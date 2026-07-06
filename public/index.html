@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>StabIt - Auth</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #000;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+#phone-canvas {
+  width: min(100vw, 430px);
+  aspect-ratio: 853/1844;
+  background: url("/assets/auth/login-bg.png") 0 0/100% 100% no-repeat;
+  position: relative;
+}
+
+.auth-input {
+  position: absolute;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 16px;
+  padding: 0 12px;
+}
+
+.auth-input:focus {
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+}
+
+.auth-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.auth-button {
+  position: absolute;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s ease;
+}
+
+.auth-button:active {
+  transform: scale(0.985);
+}
+
+.auth-button::-moz-focus-inner {
+  border: 0;
+}
+
+#username-input {
+  left: 13.83%;
+  top: 56.29%;
+  width: 70.57%;
+  height: 3.96%;
+}
+
+#password-input {
+  left: 13.83%;
+  top: 66.05%;
+  width: 70.57%;
+  height: 3.96%;
+}
+
+#login-button {
+  left: 13.95%;
+  top: 72.94%;
+  width: 70.57%;
+  height: 4.61%;
+}
+
+#register-button {
+  left: 13.95%;
+  top: 79.99%;
+  width: 70.57%;
+  height: 4.61%;
+}
+
+.validation-error {
+  position: absolute;
+  color: #ff4444;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#username-error {
+  left: 13.83%;
+  top: 60.5%;
+}
+
+#password-error {
+  left: 13.83%;
+  top: 70.3%;
+}
+
+.hitbox-outline #username-input,
+.hitbox-outline #password-input,
+.hitbox-outline #login-button,
+.hitbox-outline #register-button {
+  outline: 2px solid #ff00ff;
+  outline-offset: 2px;
+}
+
+.hitbox-label {
+  position: absolute;
+  color: #ff00ff;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div id="phone-canvas">
+  <input type="text" id="username-input" class="auth-input" placeholder="用户名">
+  <div id="username-error" class="validation-error"></div>
+  
+  <input type="password" id="password-input" class="auth-input" placeholder="密码">
+  <div id="password-error" class="validation-error"></div>
+  
+  <button id="login-button" class="auth-button"></button>
+  <button id="register-button" class="auth-button"></button>
+</div>
+
+<script>
+const SHOW_AUTH_HITBOXES = true;
+
+const phoneCanvas = document.getElementById('phone-canvas');
+const usernameInput = document.getElementById('username-input');
+const passwordInput = document.getElementById('password-input');
+const loginButton = document.getElementById('login-button');
+const registerButton = document.getElementById('register-button');
+const usernameError = document.getElementById('username-error');
+const passwordError = document.getElementById('password-error');
+
+let isRegisterMode = false;
+
+if (SHOW_AUTH_HITBOXES) {
+  phoneCanvas.classList.add('hitbox-outline');
+  
+  const createHitboxLabel = (element, label) => {
+    const labelEl = document.createElement('div');
+    labelEl.className = 'hitbox-label';
+    labelEl.textContent = label;
+    const rect = element.getBoundingClientRect();
+    labelEl.style.left = (element.offsetLeft - 2) + 'px';
+    labelEl.style.top = (element.offsetTop - 18) + 'px';
+    phoneCanvas.appendChild(labelEl);
+  };
+  
+  createHitboxLabel(usernameInput, 'username');
+  createHitboxLabel(passwordInput, 'password');
+  createHitboxLabel(loginButton, 'login');
+  createHitboxLabel(registerButton, 'register');
+}
+
+function getUsers() {
+  try {
+    const data = localStorage.getItem('stabItUsers');
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUsers(users) {
+  localStorage.setItem('stabItUsers', JSON.stringify(users));
+}
+
+function setCurrentUser(user) {
+  localStorage.setItem('stabItCurrentUser', JSON.stringify(user));
+}
+
+function getCurrentUser() {
+  try {
+    const data = localStorage.getItem('stabItCurrentUser');
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearErrors() {
+  usernameError.textContent = '';
+  passwordError.textContent = '';
+}
+
+function validateUsername(username) {
+  if (!username.trim()) {
+    return '请输入用户名';
+  }
+  if (username.length < 3) {
+    return '用户名至少3个字符';
+  }
+  return '';
+}
+
+function validatePassword(password) {
+  if (!password) {
+    return '请输入密码';
+  }
+  if (password.length < 6) {
+    return '密码至少6个字符';
+  }
+  return '';
+}
+
+function switchMode() {
+  isRegisterMode = !isRegisterMode;
+  clearErrors();
+  usernameInput.value = '';
+  passwordInput.value = '';
+  
+  if (isRegisterMode) {
+    usernameInput.placeholder = '设置用户名';
+    passwordInput.placeholder = '设置密码';
+  } else {
+    usernameInput.placeholder = '用户名';
+    passwordInput.placeholder = '密码';
+  }
+}
+
+function handleLogin() {
+  clearErrors();
+  
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  
+  const usernameErr = validateUsername(username);
+  const passwordErr = validatePassword(password);
+  
+  if (usernameErr) {
+    usernameError.textContent = usernameErr;
+    return;
+  }
+  if (passwordErr) {
+    passwordError.textContent = passwordErr;
+    return;
+  }
+  
+  const users = getUsers();
+  const user = users.find(u => u.nickname === username && u.password === password);
+  
+  if (user) {
+    setCurrentUser(user);
+  } else {
+    passwordError.textContent = '用户名或密码错误';
+  }
+}
+
+function handleRegister() {
+  clearErrors();
+  
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  
+  const usernameErr = validateUsername(username);
+  const passwordErr = validatePassword(password);
+  
+  if (usernameErr) {
+    usernameError.textContent = usernameErr;
+    return;
+  }
+  if (passwordErr) {
+    passwordError.textContent = passwordErr;
+    return;
+  }
+  
+  const users = getUsers();
+  const exists = users.find(u => u.nickname === username);
+  
+  if (exists) {
+    usernameError.textContent = '用户名已存在';
+    return;
+  }
+  
+  const newUser = {
+    nickname: username,
+    password: password,
+    createdAt: Date.now()
+  };
+  
+  users.push(newUser);
+  saveUsers(users);
+  setCurrentUser(newUser);
+  
+  setTimeout(() => {
+    switchMode();
+  }, 1500);
+}
+
+loginButton.addEventListener('click', () => {
+  if (isRegisterMode) {
+    switchMode();
+  } else {
+    handleLogin();
+  }
+});
+
+registerButton.addEventListener('click', () => {
+  if (isRegisterMode) {
+    handleRegister();
+  } else {
+    switchMode();
+  }
+});
+
+usernameInput.addEventListener('input', clearErrors);
+passwordInput.addEventListener('input', clearErrors);
+</script>
+</body>
+</html>
