@@ -179,6 +179,27 @@ body {
   pointer-events: none;
 }
 
+#chat-screen {
+  display: none;
+  width: min(100vw, 430px);
+  aspect-ratio: 853/1844;
+  background: url("./assets/chat/chat-background.png") 0 0/100% 100% no-repeat;
+  position: relative;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+#chat-screen.show {
+  opacity: 1;
+}
+
+#chat-screen .pain-dot {
+  position: absolute;
+  width: 8%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 #auth-message {
   position: absolute;
   bottom: 7%;
@@ -216,6 +237,8 @@ body {
 <div id="home-screen">
   <div id="home-message"></div>
 </div>
+
+<div id="chat-screen"></div>
 
 <script>
 const SHOW_AUTH_HITBOXES = false;
@@ -350,10 +373,34 @@ const STUFFY_BODY_ZONE = {
   radiusY: 20
 };
 
-const SHOW_BODY_ZONE = true;
+const CHAT_BODY_SCALE = 0.69;
+
+const CHAT_BODY_ZONE = {
+  centerX: 50,
+  centerY: 27,
+  radiusX: STUFFY_BODY_ZONE.radiusX * CHAT_BODY_SCALE,
+  radiusY: STUFFY_BODY_ZONE.radiusY * CHAT_BODY_SCALE
+};
+
+const SHOW_CHAT_BODY_ZONE = false;
+
+function normalizePointInZone(percentX, percentY, zone) {
+  return {
+    x: (percentX - (zone.centerX - zone.radiusX)) / (zone.radiusX * 2),
+    y: (percentY - (zone.centerY - zone.radiusY)) / (zone.radiusY * 2)
+  };
+}
+
+function mapNormalizedPointToZone(point, zone) {
+  return {
+    percentX: (zone.centerX - zone.radiusX) + point.x * (zone.radiusX * 2),
+    percentY: (zone.centerY - zone.radiusY) + point.y * (zone.radiusY * 2)
+  };
+}
 
 const homeScreen = document.getElementById('home-screen');
 const homeMessage = document.getElementById('home-message');
+const chatScreen = document.getElementById('chat-screen');
 
 // ============================================
 // Scene Switching
@@ -406,7 +453,7 @@ function createPainDot(percentX, percentY) {
   removeExistingPainDots();
   const dot = document.createElement('img');
   dot.className = 'pain-dot';
-  dot.src = '/assets/home/pain-dot.png';
+  dot.src = '/assets/chat/pain-dot.png';
   dot.style.left = percentX + '%';
   dot.style.top = percentY + '%';
   homeScreen.appendChild(dot);
@@ -416,21 +463,31 @@ function createPainDot(percentX, percentY) {
 function savePainDot(percentX, percentY) {
   const currentUser = getCurrentUser();
   if (currentUser) {
+    const normalized = normalizePointInZone(percentX, percentY, STUFFY_BODY_ZONE);
+
     currentUser.painPins = [{
-      percentX: percentX,
-      percentY: percentY,
+      x: normalized.x,
+      y: normalized.y,
       createdAt: Date.now()
     }];
+
     UserStorage.updateUser(currentUser);
+    UserStorage.setCurrentUser(currentUser.username);
   }
 }
+
 
 function loadSavedPainDots() {
   removeExistingPainDots();
   const currentUser = getCurrentUser();
   if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
     const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
-    createPainDot(latestPin.percentX, latestPin.percentY);
+    const homePoint = mapNormalizedPointToZone(latestPin, STUFFY_BODY_ZONE);
+
+    createPainDot(
+        homePoint.percentX,
+        homePoint.percentY
+    );
   }
 }
 
@@ -443,7 +500,56 @@ function showHomeMessage(text) {
 }
 
 function goToChatScene() {
-  console.log("Transition placeholder");
+  showChatScreen();
+}
+
+function showChatScreen() {
+  homeScreen.style.display = 'none';
+  
+  chatScreen.style.display = 'block';
+  chatScreen.querySelectorAll('.pain-dot').forEach(dot => dot.remove());
+  chatScreen.querySelectorAll('.body-zone-outline').forEach(o => o.remove());
+  chatScreen.querySelectorAll('.body-zone-label').forEach(l => l.remove());
+
+  setTimeout(() => {
+    chatScreen.classList.add('show');
+  }, 50);
+  
+  const currentUser = getCurrentUser();
+  if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
+    const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
+    
+    const dot = document.createElement('img');
+    dot.className = 'pain-dot';
+    dot.src = '/assets/chat/pain-dot.png';
+    
+    if (latestPin.x !== undefined && latestPin.y !== undefined) {
+      const chatPoint = mapNormalizedPointToZone(latestPin, CHAT_BODY_ZONE);
+
+      dot.style.left = chatPoint.percentX + '%';
+      dot.style.top = chatPoint.percentY + '%';
+
+      chatScreen.appendChild(dot);
+  }
+    
+  }
+  
+  if (SHOW_CHAT_BODY_ZONE) {
+    const outline = document.createElement('div');
+    outline.className = 'body-zone-outline';
+    outline.style.left = (CHAT_BODY_ZONE.centerX - CHAT_BODY_ZONE.radiusX) + '%';
+    outline.style.top = (CHAT_BODY_ZONE.centerY - CHAT_BODY_ZONE.radiusY) + '%';
+    outline.style.width = (CHAT_BODY_ZONE.radiusX * 2) + '%';
+    outline.style.height = (CHAT_BODY_ZONE.radiusY * 2) + '%';
+    chatScreen.appendChild(outline);
+    
+    const label = document.createElement('div');
+    label.className = 'body-zone-label';
+    label.textContent = 'chat-body-zone';
+    label.style.left = (CHAT_BODY_ZONE.centerX - CHAT_BODY_ZONE.radiusX) + '%';
+    label.style.top = (CHAT_BODY_ZONE.centerY - CHAT_BODY_ZONE.radiusY - 15) + '%';
+    chatScreen.appendChild(label);
+  }
 }
 
 homeScreen.addEventListener('click', (e) => {
