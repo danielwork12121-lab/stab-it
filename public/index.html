@@ -60,36 +60,42 @@ body {
   transform: scale(0.985);
 }
 
+.auth-button.button-pressed {
+  background: rgba(255,255,255,0.08);
+  transform: scale(0.985);
+  border-radius: 8px;
+}
+
 .auth-button::-moz-focus-inner {
   border: 0;
 }
 
 #username-input {
-  left: 13.83%;
-  top: 56.29%;
-  width: 70.57%;
-  height: 3.96%;
+  left: 57px;
+  top: 540px;
+  width: 74.21%;
+  height: 4.12%;
 }
 
 #password-input {
-  left: 13.83%;
-  top: 66.05%;
-  width: 70.57%;
-  height: 3.96%;
+  left: 57px;
+  top: 630px;
+  width: 74.21%;
+  height: 4.18%;
 }
 
 #login-button {
-  left: 13.95%;
-  top: 72.94%;
-  width: 70.57%;
-  height: 4.61%;
+  left: 11.37%;
+  top: 702px;
+  width: 74.21%;
+  height: 4.39%;
 }
 
 #register-button {
-  left: 13.95%;
-  top: 79.99%;
-  width: 70.57%;
-  height: 4.61%;
+  left: 11.37%;
+  top: 767px;
+  width: 74.21%;
+  height: 5.21%;
 }
 
 .validation-error {
@@ -124,11 +130,79 @@ body {
   white-space: nowrap;
   pointer-events: none;
 }
+
+#home-screen {
+  display: none;
+  width: min(100vw, 430px);
+  aspect-ratio: 853/1844;
+  background: url("./assets/home/stuffy-home.png") 0 0/100% 100% no-repeat;
+  position: relative;
+}
+
+.pain-dot {
+  position: absolute;
+  width: 8%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+#home-message {
+  position: absolute;
+  bottom: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#home-message.show {
+  opacity: 1;
+}
+
+.body-zone-outline {
+  position: absolute;
+  border: 2px dashed #ff00ff;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.body-zone-label {
+  position: absolute;
+  color: #ff00ff;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#auth-message {
+  position: absolute;
+  bottom: 7%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#auth-message.show {
+  opacity: 1;
+}
 </style>
 </head>
 <body>
 <div id="phone-canvas">
-  <input type="text" id="username-input" class="auth-input" placeholder="用户名">
+  <input type="text" id="username-input" class="auth-input" placeholder="昵称">
   <div id="username-error" class="validation-error"></div>
   
   <input type="password" id="password-input" class="auth-input" placeholder="密码">
@@ -136,10 +210,15 @@ body {
   
   <button id="login-button" class="auth-button"></button>
   <button id="register-button" class="auth-button"></button>
+  <div id="auth-message"></div>
+</div>
+
+<div id="home-screen">
+  <div id="home-message"></div>
 </div>
 
 <script>
-const SHOW_AUTH_HITBOXES = true;
+const SHOW_AUTH_HITBOXES = false;
 
 const phoneCanvas = document.getElementById('phone-canvas');
 const usernameInput = document.getElementById('username-input');
@@ -148,6 +227,7 @@ const loginButton = document.getElementById('login-button');
 const registerButton = document.getElementById('register-button');
 const usernameError = document.getElementById('username-error');
 const passwordError = document.getElementById('password-error');
+const authMessage = document.getElementById('auth-message');
 
 let isRegisterMode = false;
 
@@ -170,30 +250,225 @@ if (SHOW_AUTH_HITBOXES) {
   createHitboxLabel(registerButton, 'register');
 }
 
-function getUsers() {
+// ============================================
+// UserStorage - Centralized data access layer
+// This is the future cloud migration boundary
+// Replace localStorage with Supabase here
+// ============================================
+const UserStorage = {
+  KEY_USERS: 'stabItUsers',
+  KEY_CURRENT_USER: 'stabItCurrentUser',
+
+  getUser(username) {
+    const users = this.getUsers();
+    return users.find(u => u.username === username);
+  },
+
+  getUsers() {
+    try {
+      const data = localStorage.getItem(this.KEY_USERS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  saveUser(user) {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.username === user.username);
+    if (index >= 0) {
+      users[index] = user;
+    } else {
+      users.push(user);
+    }
+    localStorage.setItem(this.KEY_USERS, JSON.stringify(users));
+    return user;
+  },
+
+  getCurrentUser() {
+    try {
+      const data = localStorage.getItem(this.KEY_CURRENT_USER);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  setCurrentUser(username) {
+    const user = this.getUser(username);
+    if (user) {
+      localStorage.setItem(this.KEY_CURRENT_USER, JSON.stringify(user));
+    }
+  },
+
+  logout() {
+    localStorage.removeItem(this.KEY_CURRENT_USER);
+  },
+
+  updateUser(user) {
+    return this.saveUser(user);
+  },
+
+  createNewUser(username, password) {
+    const user = {
+      username,
+      password,
+      createdAt: Date.now(),
+      companionDays: 1,
+      painPins: [],
+      chatHistory: [],
+      settings: {},
+      progression: {}
+    };
+    return this.saveUser(user);
+  }
+};
+
+// Legacy function wrappers for backward compatibility
+function getUsers() { return UserStorage.getUsers(); }
+function saveUsers(users) { 
   try {
-    const data = localStorage.getItem('stabItUsers');
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
+    localStorage.setItem(UserStorage.KEY_USERS, JSON.stringify(users));
+  } catch(e) { console.error(e); }
+}
+function getCurrentUser() { return UserStorage.getCurrentUser(); }
+function setCurrentUser(user) { 
+  if (user && user.username) {
+    UserStorage.setCurrentUser(user.username);
+  } else {
+    localStorage.setItem(UserStorage.KEY_CURRENT_USER, JSON.stringify(user));
   }
 }
 
-function saveUsers(users) {
-  localStorage.setItem('stabItUsers', JSON.stringify(users));
+// ============================================
+// Body Zone
+// ============================================
+const STUFFY_BODY_ZONE = {
+  centerX: 50,
+  centerY: 50,
+  radiusX: 22,
+  radiusY: 20
+};
+
+const SHOW_BODY_ZONE = true;
+
+const homeScreen = document.getElementById('home-screen');
+const homeMessage = document.getElementById('home-message');
+
+// ============================================
+// Scene Switching
+// ============================================
+function showAuthScreen() {
+  phoneCanvas.style.display = 'block';
+  homeScreen.style.display = 'none';
 }
 
-function setCurrentUser(user) {
-  localStorage.setItem('stabItCurrentUser', JSON.stringify(user));
-}
-
-function getCurrentUser() {
-  try {
-    const data = localStorage.getItem('stabItCurrentUser');
-    return data ? JSON.parse(data) : null;
-  } catch {
-    return null;
+function showHomeScreen() {
+  const HOME_BG_PATH = './assets/home/stuffy-home.png';
+  console.log("home background path:", HOME_BG_PATH);
+  phoneCanvas.style.display = 'none';
+  homeScreen.style.display = 'block';
+  loadSavedPainDots();
+  
+  if (SHOW_BODY_ZONE) {
+    const outline = document.createElement('div');
+    outline.className = 'body-zone-outline';
+    outline.style.left = (STUFFY_BODY_ZONE.centerX - STUFFY_BODY_ZONE.radiusX) + '%';
+    outline.style.top = (STUFFY_BODY_ZONE.centerY - STUFFY_BODY_ZONE.radiusY) + '%';
+    outline.style.width = (STUFFY_BODY_ZONE.radiusX * 2) + '%';
+    outline.style.height = (STUFFY_BODY_ZONE.radiusY * 2) + '%';
+    homeScreen.appendChild(outline);
+    
+    const label = document.createElement('div');
+    label.className = 'body-zone-label';
+    label.textContent = 'body-zone';
+    label.style.left = (STUFFY_BODY_ZONE.centerX - STUFFY_BODY_ZONE.radiusX) + '%';
+    label.style.top = (STUFFY_BODY_ZONE.centerY - STUFFY_BODY_ZONE.radiusY - 15) + '%';
+    homeScreen.appendChild(label);
   }
+}
+
+function isInsideBodyZone(percentX, percentY) {
+  const dx = (percentX - STUFFY_BODY_ZONE.centerX) / STUFFY_BODY_ZONE.radiusX;
+  const dy = (percentY - STUFFY_BODY_ZONE.centerY) / STUFFY_BODY_ZONE.radiusY;
+  return (dx * dx + dy * dy) <= 1;
+}
+
+// ============================================
+// Pain Pin
+// ============================================
+function removeExistingPainDots() {
+  const dots = homeScreen.querySelectorAll('.pain-dot');
+  dots.forEach(dot => dot.remove());
+}
+
+function createPainDot(percentX, percentY) {
+  removeExistingPainDots();
+  const dot = document.createElement('img');
+  dot.className = 'pain-dot';
+  dot.src = '/assets/home/pain-dot.png';
+  dot.style.left = percentX + '%';
+  dot.style.top = percentY + '%';
+  homeScreen.appendChild(dot);
+  return dot;
+}
+
+function savePainDot(percentX, percentY) {
+  const currentUser = getCurrentUser();
+  if (currentUser) {
+    currentUser.painPins = [{
+      percentX: percentX,
+      percentY: percentY,
+      createdAt: Date.now()
+    }];
+    UserStorage.updateUser(currentUser);
+  }
+}
+
+function loadSavedPainDots() {
+  removeExistingPainDots();
+  const currentUser = getCurrentUser();
+  if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
+    const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
+    createPainDot(latestPin.percentX, latestPin.percentY);
+  }
+}
+
+function showHomeMessage(text) {
+  homeMessage.textContent = text;
+  homeMessage.classList.add('show');
+  setTimeout(() => {
+    homeMessage.classList.remove('show');
+  }, 2000);
+}
+
+function goToChatScene() {
+  console.log("Transition placeholder");
+}
+
+homeScreen.addEventListener('click', (e) => {
+  const rect = homeScreen.getBoundingClientRect();
+  const percentX = ((e.clientX - rect.left) / rect.width) * 100;
+  const percentY = ((e.clientY - rect.top) / rect.height) * 100;
+  
+  if (isInsideBodyZone(percentX, percentY)) {
+    createPainDot(percentX, percentY);
+    savePainDot(percentX, percentY);
+    showHomeMessage('烦恼已经被忧忧接住了。');
+    setTimeout(() => {
+      goToChatScene();
+    }, 1000);
+  } else {
+    showHomeMessage('请点击忧忧身上的位置来记录烦恼');
+  }
+});
+
+// ============================================
+// Authentication
+// ============================================
+function showAuthMessage(text) {
+  authMessage.textContent = text;
+  authMessage.classList.add('show');
 }
 
 function clearErrors() {
@@ -205,18 +480,12 @@ function validateUsername(username) {
   if (!username.trim()) {
     return '请输入用户名';
   }
-  if (username.length < 3) {
-    return '用户名至少3个字符';
-  }
   return '';
 }
 
 function validatePassword(password) {
   if (!password) {
     return '请输入密码';
-  }
-  if (password.length < 6) {
-    return '密码至少6个字符';
   }
   return '';
 }
@@ -242,6 +511,14 @@ function handleLogin() {
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
   
+  console.log("login clicked", username, password);
+  console.log("saved users", UserStorage.getUsers());
+  
+  if (!username || !password) {
+    showAuthMessage('请填写昵称和密码');
+    return;
+  }
+  
   const usernameErr = validateUsername(username);
   const passwordErr = validatePassword(password);
   
@@ -254,13 +531,17 @@ function handleLogin() {
     return;
   }
   
-  const users = getUsers();
-  const user = users.find(u => u.nickname === username && u.password === password);
+  const matchedUser = UserStorage.getUser(username);
+  console.log("login matched user", matchedUser);
   
-  if (user) {
-    setCurrentUser(user);
+  if (matchedUser && matchedUser.password === password) {
+    UserStorage.setCurrentUser(username);
+    showAuthMessage('登录成功，正在进入忧忧…');
+    setTimeout(() => {
+      showHomeScreen();
+    }, 600);
   } else {
-    passwordError.textContent = '用户名或密码错误';
+    showAuthMessage('昵称或密码不正确');
   }
 }
 
@@ -270,6 +551,13 @@ function handleRegister() {
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
   
+  console.log("register clicked", username, password);
+  
+  if (!username || !password) {
+    showAuthMessage('请填写昵称和密码');
+    return;
+  }
+  
   const usernameErr = validateUsername(username);
   const passwordErr = validatePassword(password);
   
@@ -282,47 +570,42 @@ function handleRegister() {
     return;
   }
   
-  const users = getUsers();
-  const exists = users.find(u => u.nickname === username);
-  
-  if (exists) {
-    usernameError.textContent = '用户名已存在';
+  if (UserStorage.getUser(username)) {
+    showAuthMessage('这个昵称已经被注册了');
     return;
   }
   
-  const newUser = {
-    nickname: username,
-    password: password,
-    createdAt: Date.now()
-  };
+  UserStorage.createNewUser(username, password);
+  console.log("saved users", UserStorage.getUsers());
+  showAuthMessage('注册成功，请点击登录进入');
   
-  users.push(newUser);
-  saveUsers(users);
-  setCurrentUser(newUser);
-  
-  setTimeout(() => {
-    switchMode();
-  }, 1500);
+  isRegisterMode = false;
+  usernameInput.placeholder = '用户名';
+  passwordInput.placeholder = '密码';
 }
 
-loginButton.addEventListener('click', () => {
-  if (isRegisterMode) {
-    switchMode();
-  } else {
-    handleLogin();
-  }
-});
+loginButton.addEventListener('click', handleLogin);
+registerButton.addEventListener('click', handleRegister);
 
-registerButton.addEventListener('click', () => {
-  if (isRegisterMode) {
-    handleRegister();
-  } else {
-    switchMode();
-  }
-});
+function addButtonPressFeedback(button) {
+  button.addEventListener('mousedown', () => button.classList.add('button-pressed'));
+  button.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    button.classList.add('button-pressed');
+  });
+  button.addEventListener('mouseup', () => button.classList.remove('button-pressed'));
+  button.addEventListener('mouseleave', () => button.classList.remove('button-pressed'));
+  button.addEventListener('touchend', () => button.classList.remove('button-pressed'));
+}
+
+addButtonPressFeedback(loginButton);
+addButtonPressFeedback(registerButton);
 
 usernameInput.addEventListener('input', clearErrors);
 passwordInput.addEventListener('input', clearErrors);
+
+UserStorage.logout();
+showAuthScreen();
 </script>
 </body>
 </html>
