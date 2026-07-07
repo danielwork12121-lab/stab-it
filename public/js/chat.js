@@ -7,6 +7,28 @@ const MOCK_REPLIES = [
 
 const GREETING_MESSAGE = "我在呢，慢慢说。今天发生了什么让你不开心呀？";
 
+const SUMMARY_TEXT = `📍
+忧忧已经替你收下了
+这一份烦恼。
+
+目前承载着
+
+1 根针。
+
+如果还有放不下的烦恼，
+就继续向忧忧扎下一针吧。💜`;
+
+const PIN_FLYING_SIZE = '22%';
+const PIN_STUCK_SIZE = '15%';
+
+const PAIN_DOT_CHAT_SIZE = '12%';
+const PAIN_DOT_LANDING_SIZE = '12%';
+
+const PIN_FLYING_ROTATION = '-25deg';
+const PIN_STUCK_ROTATION = '0deg';
+const PIN_STUCK_OFFSET_Y = -1.4;
+const PIN_STUCK_OFFSET_X = 1.5;
+
 function injectChatStyles() {
   const style = document.createElement('style');
   style.textContent = `
@@ -139,6 +161,119 @@ function injectChatStyles() {
       color: white;
       font-size: 18px;
     }
+    
+    .chat-log.ceremony-fade {
+      opacity: 0;
+      transform: translateY(-10px);
+      transition: opacity 450ms ease, transform 450ms ease;
+    }
+    
+    .chat-input-area.ceremony-slide {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 450ms ease, transform 450ms ease;
+    }
+    
+    .ceremony-projectile {
+      position: absolute;
+      width: var(--pin-flying-size, 22%);
+      pointer-events: none;
+      z-index: 20;
+      transform-origin: center center;
+    }
+    
+    .ceremony-projectile.animating {
+      transition: left 800ms cubic-bezier(0.25, 0.46, 0.45, 0.94), 
+                  top 800ms cubic-bezier(0.68, -0.55, 0.27, 1.55), 
+                  transform 800ms ease-out;
+    }
+    
+    .pin-stuck {
+      position: absolute;
+      width: var(--pin-stuck-size, 15%);
+      pointer-events: none;
+      z-index: 15;
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+    }
+    
+    .pin-stuck.landing {
+      animation: pinStuckLanding 200ms ease;
+    }
+    
+    @keyframes pinStuckLanding {
+      0% { transform: translate(-50%, -50%) scale(0.8); }
+      50% { transform: translate(-50%, -50%) scale(1.15); }
+      100% { transform: translate(-50%, -50%) scale(1); }
+    }
+    
+    .pain-dot.landing {
+      animation: painDotLanding 200ms ease;
+    }
+    
+    @keyframes painDotLanding {
+      0% { transform: translate(-50%, -50%) scale(0.8); }
+      50% { transform: translate(-50%, -50%) scale(1.15); }
+      100% { transform: translate(-50%, -50%) scale(1); }
+    }
+    
+    .ceremony-glow {
+      position: absolute;
+      width: 24%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 10;
+
+      background:
+        radial-gradient(circle,
+          rgba(225,185,255,0.95) 0%,
+          rgba(195,120,255,0.75) 28%,
+          rgba(165,90,255,0.45) 58%,
+          rgba(150,70,255,0.18) 78%,
+          transparent 100%);
+}
+    
+    .ceremony-glow.impact {
+      animation: glowExpand 500ms ease-out;
+    }
+    
+    @keyframes glowExpand {
+      0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+    }
+    
+    .summary-panel {
+      position: absolute;
+      left: 4%;
+      top: 45%;
+      width: 92%;
+      height: 50%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      color: white;
+      font-size: 16px;
+      line-height: 1.8;
+      padding: 20px;
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 400ms ease, transform 400ms ease;
+    }
+    
+    .summary-panel.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    
+    .summary-panel p {
+      margin: 0;
+      white-space: pre-line;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
   `;
   document.head.appendChild(style);
 }
@@ -197,6 +332,11 @@ function handleChatInput(e) {
 function sendMessage() {
   const text = chatInput.value.trim();
   if (!text) return;
+  
+  if (text.toLowerCase() === 'go') {
+    beginPinCeremony();
+    return;
+  }
   
   addMessage('user', text);
   saveMessage('user', text);
@@ -264,4 +404,100 @@ function loadChatHistory() {
   currentUser.chatHistory.forEach(msg => {
     addMessage(msg.sender, msg.text);
   });
+}
+
+function beginPinCeremony() {
+  chatInput.value = '';
+  chatInput.disabled = true;
+  
+  fadeOutChat();
+  
+  setTimeout(() => {
+    animatePin();
+  }, 700);
+}
+
+function fadeOutChat() {
+  chatLog.classList.add('ceremony-fade');
+  chatPanel.querySelector('.chat-input-area').classList.add('ceremony-slide');
+}
+
+function animatePin() {
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.painPins || currentUser.painPins.length === 0) {
+    showSummaryPanel();
+    return;
+  }
+  
+  const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
+  const chatPoint = mapNormalizedPointToZone(latestPin, CHAT_BODY_ZONE);
+  
+  const projectile = document.createElement('img');
+  projectile.className = 'ceremony-projectile';
+  projectile.src = '/assets/pin/pin-flying.png';
+  projectile.style.left = '115%';
+  projectile.style.top = chatPoint.percentY + '%';
+  projectile.style.width = PIN_FLYING_SIZE;
+  projectile.style.transform = `translate(-50%, -50%) scale(1.7) rotate(${PIN_FLYING_ROTATION})`;
+  
+  chatScreen.appendChild(projectile);
+  
+  setTimeout(() => {
+    projectile.classList.add('animating');
+    projectile.style.left = chatPoint.percentX + '%';
+    projectile.style.top = chatPoint.percentY + '%';
+    projectile.style.transform = `translate(-50%, -50%) scale(1) rotate(${PIN_STUCK_ROTATION})`;
+  }, 50);
+  
+  setTimeout(() => {
+    projectile.remove();
+    
+    const existingPainDot = chatScreen.querySelector('.pain-dot');
+    if (existingPainDot) {
+      existingPainDot.classList.add('landing');
+      existingPainDot.style.width = PAIN_DOT_LANDING_SIZE;
+    }
+
+    // if (existingPainDot) {
+    //   existingPainDot.remove();
+    // }
+    
+    const pinStuck = document.createElement('img');
+    pinStuck.className = 'pin-stuck landing';
+    pinStuck.src = '/assets/pin/pin-stuck.png';
+    pinStuck.style.left = chatPoint.percentX+PIN_STUCK_OFFSET_X + '%';
+    pinStuck.style.top = (chatPoint.percentY+PIN_STUCK_OFFSET_Y) + '%';
+    pinStuck.style.width = PIN_STUCK_SIZE;
+    chatScreen.appendChild(pinStuck);
+    
+    const glow = document.createElement('div');
+    glow.className = 'ceremony-glow impact';
+    glow.style.left = chatPoint.percentX + '%';
+    glow.style.top = (chatPoint.percentY) + '%';
+    chatScreen.appendChild(glow);
+    
+    setTimeout(() => {
+      showSummaryPanel();
+    }, 300);
+  }, 850);
+}
+
+function showSummaryPanel() {
+  const existingPanel = chatScreen.querySelector('.summary-panel');
+  if (existingPanel) {
+    existingPanel.remove();
+  }
+  
+  const summaryPanel = document.createElement('div');
+  summaryPanel.className = 'summary-panel';
+  
+  const textEl = document.createElement('p');
+  textEl.textContent = SUMMARY_TEXT;
+  
+  summaryPanel.appendChild(textEl);
+  chatScreen.appendChild(summaryPanel);
+  
+  setTimeout(() => {
+    summaryPanel.classList.add('show');
+  }, 50);
 }
