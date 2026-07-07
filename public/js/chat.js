@@ -7,27 +7,20 @@ const MOCK_REPLIES = [
 
 const GREETING_MESSAGE = "我在呢，慢慢说。今天发生了什么让你不开心呀？";
 
-const SUMMARY_TEXT = `📍
-忧忧已经替你收下了
-这一份烦恼。
-
-目前承载着
-
-1 根针。
-
-如果还有放不下的烦恼，
-就继续向忧忧扎下一针吧。💜`;
+const SUMMARY_BLOCKS = {
+  primary: '忧忧已经替你收下了\n这一份烦恼。',
+  count: '目前承载着 1 根针。',
+  secondary: '如果还有放不下的烦恼，\n就继续向忧忧扎下一针吧。💜'
+};
 
 const PIN_FLYING_SIZE = '22%';
-const PIN_STUCK_SIZE = '15%';
 
 const PAIN_DOT_CHAT_SIZE = '12%';
 const PAIN_DOT_LANDING_SIZE = '12%';
 
 const PIN_FLYING_ROTATION = '-25deg';
 const PIN_STUCK_ROTATION = '0deg';
-const PIN_STUCK_OFFSET_Y = -1.4;
-const PIN_STUCK_OFFSET_X = 1.5;
+
 
 function injectChatStyles() {
   const style = document.createElement('style');
@@ -252,16 +245,15 @@ function injectChatStyles() {
       height: 50%;
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      justify-content: flex-start;
       align-items: center;
       text-align: center;
       color: white;
-      font-size: 16px;
-      line-height: 1.8;
-      padding: 20px;
+      padding: 30px 20px 20px;
       opacity: 0;
       transform: translateY(30px);
       transition: opacity 400ms ease, transform 400ms ease;
+      gap: 16px;
     }
     
     .summary-panel.show {
@@ -269,10 +261,62 @@ function injectChatStyles() {
       transform: translateY(0);
     }
     
-    .summary-panel p {
+    .summary-line {
       margin: 0;
+      max-width: 270px;
       white-space: pre-line;
       text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+    
+    .summary-line.primary {
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+    
+    .summary-line.count {
+      font-size: 17px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    
+    .summary-line.secondary {
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.4;
+      opacity: 0.9;
+    }
+    
+    .summary-buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: auto;
+      padding-bottom: 10px;
+    }
+    
+    .summary-btn {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 25px;
+      font-size: 15px;
+      font-weight: 500;
+      color: white;
+      cursor: pointer;
+      background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+      box-shadow: 0 4px 15px rgba(155, 89, 182, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+      transition: all 0.2s ease;
+      min-width: 120px;
+    }
+    
+    .summary-btn:hover {
+      background: linear-gradient(135deg, #a86cb8 0%, #9b59b6 100%);
+      box-shadow: 0 4px 20px rgba(155, 89, 182, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+      transform: translateY(-1px);
+    }
+    
+    .summary-btn:active {
+      transform: translateY(1px);
+      opacity: 0.9;
     }
   `;
   document.head.appendChild(style);
@@ -409,7 +453,18 @@ function loadChatHistory() {
 function beginPinCeremony() {
   chatInput.value = '';
   chatInput.disabled = true;
-  
+
+  const currentUser = getCurrentUser();
+
+  if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
+    const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
+
+    latestPin.isAnimating = true;
+
+    UserStorage.updateUser(currentUser);
+    UserStorage.setCurrentUser(currentUser.username);
+  }
+
   fadeOutChat();
   
   setTimeout(() => {
@@ -435,6 +490,8 @@ function animatePin() {
   const projectile = document.createElement('img');
   projectile.className = 'ceremony-projectile';
   projectile.src = '/assets/pin/pin-flying.png';
+
+  projectile.style.opacity = '0';
   projectile.style.left = '115%';
   projectile.style.top = chatPoint.percentY + '%';
   projectile.style.width = PIN_FLYING_SIZE;
@@ -443,24 +500,21 @@ function animatePin() {
   chatScreen.appendChild(projectile);
   
   setTimeout(() => {
-    projectile.classList.add('animating');
-    projectile.style.left = chatPoint.percentX + '%';
-    projectile.style.top = chatPoint.percentY + '%';
-    projectile.style.transform = `translate(-50%, -50%) scale(1) rotate(${PIN_STUCK_ROTATION})`;
-  }, 50);
+  projectile.style.opacity = '1';
+  projectile.classList.add('animating');
+
+  projectile.style.left = chatPoint.percentX + '%';
+  projectile.style.top = chatPoint.percentY + '%';
+  projectile.style.transform = `translate(-50%, -50%) scale(1) rotate(${PIN_STUCK_ROTATION})`;
+}, 50);
   
   setTimeout(() => {
     projectile.remove();
     
     const existingPainDot = chatScreen.querySelector('.pain-dot');
     if (existingPainDot) {
-      existingPainDot.classList.add('landing');
-      existingPainDot.style.width = PAIN_DOT_LANDING_SIZE;
+      existingPainDot.remove();
     }
-
-    // if (existingPainDot) {
-    //   existingPainDot.remove();
-    // }
     
     const pinStuck = document.createElement('img');
     pinStuck.className = 'pin-stuck landing';
@@ -476,6 +530,19 @@ function animatePin() {
     glow.style.top = (chatPoint.percentY) + '%';
     chatScreen.appendChild(glow);
     
+    latestPin.completed = true;
+    latestPin.hasNeedle = true;
+    latestPin.isAnimating = false;
+    
+    if (DEV_MODE) {
+      console.log('[PIN DEBUG] pin marked as completed:', latestPin.x, latestPin.y);
+    }
+    
+    UserStorage.updateUser(currentUser);
+    UserStorage.setCurrentUser(currentUser.username);
+    
+    playPinImpactSound();
+    
     setTimeout(() => {
       showSummaryPanel();
     }, 300);
@@ -488,13 +555,51 @@ function showSummaryPanel() {
     existingPanel.remove();
   }
   
+  const currentUser = getCurrentUser();
+  const pinCount = currentUser?.painPins?.length || 0;
+  
   const summaryPanel = document.createElement('div');
   summaryPanel.className = 'summary-panel';
   
-  const textEl = document.createElement('p');
-  textEl.textContent = SUMMARY_TEXT;
+  const primaryEl = document.createElement('div');
+  primaryEl.className = 'summary-line primary';
+  primaryEl.textContent = SUMMARY_BLOCKS.primary;
   
-  summaryPanel.appendChild(textEl);
+  const countEl = document.createElement('div');
+  countEl.className = 'summary-line count';
+  countEl.textContent = `目前承载着 ${pinCount} 根针。`;
+  
+  const secondaryEl = document.createElement('div');
+  secondaryEl.className = 'summary-line secondary';
+  secondaryEl.textContent = SUMMARY_BLOCKS.secondary;
+  
+  const buttonsContainer = document.createElement('div');
+  buttonsContainer.className = 'summary-buttons';
+  
+  const leftBtn = document.createElement('button');
+  leftBtn.className = 'summary-btn';
+  leftBtn.textContent = '再扎下一针';
+  leftBtn.addEventListener('click', () => {
+    showHomeScreen();
+  });
+  
+  const rightBtn = document.createElement('button');
+  rightBtn.className = 'summary-btn';
+  rightBtn.textContent = '今天先到这里';
+  rightBtn.addEventListener('click', () => {
+    showHomeMessage('忧忧会替你先收好这些烦恼。');
+    setTimeout(() => {
+      showHomeScreen();
+    }, 2000);
+  });
+  
+  buttonsContainer.appendChild(leftBtn);
+  buttonsContainer.appendChild(rightBtn);
+  
+  summaryPanel.appendChild(primaryEl);
+  summaryPanel.appendChild(countEl);
+  summaryPanel.appendChild(secondaryEl);
+  summaryPanel.appendChild(buttonsContainer);
   chatScreen.appendChild(summaryPanel);
   
   setTimeout(() => {

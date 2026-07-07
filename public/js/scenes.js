@@ -16,6 +16,14 @@ function injectDayBadgeStyles() {
       transform: none;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
     }
+    .pin-stuck {
+      position: absolute;
+      width: 15%;
+      pointer-events: none;
+      z-index: 15;
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -70,11 +78,28 @@ function showAuthScreen() {
 
 function showHomeScreen() {
   console.log("home background path:", ASSETS.homeBg);
+  
+  if (DEV_MODE) {
+    const currentUser = getCurrentUser();
+    console.log('[PIN DEBUG] showHomeScreen - currentUser:', currentUser?.username);
+    console.log('[PIN DEBUG] showHomeScreen - painPins count:', currentUser?.painPins?.length || 0);
+  }
+  
   phoneCanvas.style.display = 'none';
   chatScreen.style.display = 'none';
   homeScreen.style.display = 'block';
+  
+  chatScreen.querySelectorAll('.chat-panel').forEach(p => p.remove());
+  chatScreen.querySelectorAll('.summary-panel').forEach(p => p.remove());
+  chatScreen.querySelectorAll('.pin-stuck').forEach(p => p.remove());
+  chatScreen.querySelectorAll('.ceremony-projectile').forEach(p => p.remove());
+  chatScreen.querySelectorAll('.ceremony-glow').forEach(g => g.remove());
+  chatScreen.querySelectorAll('.pain-dot').forEach(d => d.remove());
+  chatScreen.classList.remove('show');
+  
   homeScreen.querySelectorAll('.body-zone-outline').forEach(o => o.remove());
   homeScreen.querySelectorAll('.body-zone-label').forEach(l => l.remove());
+  homeScreen.querySelectorAll('.pin-stuck').forEach(p => p.remove());
 
   loadSavedPainDots();
   createDayBadge(homeScreen, HOME_DAY_BADGE_POSITION);
@@ -103,7 +128,6 @@ function removeExistingPainDots() {
 }
 
 function createPainDot(percentX, percentY) {
-  removeExistingPainDots();
   const dot = document.createElement('img');
   dot.className = 'pain-dot';
   dot.src = ASSETS.painDot;
@@ -119,11 +143,12 @@ function savePainDot(percentX, percentY) {
   if (currentUser) {
     const normalized = normalizePointInZone(percentX, percentY, STUFFY_BODY_ZONE);
 
-    currentUser.painPins = [{
+    currentUser.painPins = currentUser.painPins || [];
+    currentUser.painPins.push({
       x: normalized.x,
       y: normalized.y,
       createdAt: Date.now()
-    }];
+    });
 
     UserStorage.updateUser(currentUser);
     UserStorage.setCurrentUser(currentUser.username);
@@ -132,16 +157,85 @@ function savePainDot(percentX, percentY) {
 
 function loadSavedPainDots() {
   removeExistingPainDots();
+  homeScreen.querySelectorAll('.pin-stuck').forEach(p => p.remove());
+  
   const currentUser = getCurrentUser();
-  if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
-    const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
-    const homePoint = mapNormalizedPointToZone(latestPin, STUFFY_BODY_ZONE);
-
-    createPainDot(
-        homePoint.percentX,
-        homePoint.percentY
-    );
+  
+  if (DEV_MODE) {
+    console.log('[PIN DEBUG] loading saved pins:', currentUser?.painPins?.length || 0);
+    if (currentUser?.painPins) {
+      currentUser.painPins.forEach((pin, index) => {
+        console.log(`[PIN DEBUG] pin ${index}: x=${pin.x}, y=${pin.y}, completed=${pin.completed}, hasNeedle=${pin.hasNeedle}`);
+      });
+    }
   }
+  
+  if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
+    currentUser.painPins.forEach(pin => {
+      if ((pin.completed || pin.hasNeedle) && !pin.isAnimating) {
+        const homePoint = mapNormalizedPointToZone(pin, STUFFY_BODY_ZONE);
+        
+        if (DEV_MODE) {
+          console.log('[PIN DEBUG] rendering historical needle at:', homePoint.percentX, homePoint.percentY);
+        }
+        
+        console.log("[PIN RENDER]", {
+  original: pin,
+  mapped: homePoint
+});
+
+        const pinStuck = document.createElement('img');
+        pinStuck.className = 'pin-stuck';
+        pinStuck.src = ASSETS.pinStuck;
+
+        pinStuck.style.width = "22%";
+        pinStuck.style.left = homePoint.percentX + '%';
+        pinStuck.style.top = homePoint.percentY + '%';
+        pinStuck.style.transform = 'translate(-50%, -50%)';
+
+        homeScreen.appendChild(pinStuck);
+      } else {
+        if (DEV_MODE) {
+          console.log('[PIN DEBUG] skipping incomplete pin:', pin.x, pin.y);
+        }
+      }
+    });
+  }
+}
+
+function loadSavedNeedlesToChat() {
+
+  const currentUser = getCurrentUser();
+
+  if (!currentUser || !currentUser.painPins) return;
+
+  chatScreen.querySelectorAll('.pin-stuck').forEach(p => p.remove());
+
+  currentUser.painPins.forEach(pin => {
+
+    if (pin.completed || pin.hasNeedle) {
+
+      const chatPoint = mapNormalizedPointToZone(
+        pin,
+        CHAT_BODY_ZONE
+      );
+
+      const pinStuck = document.createElement('img');
+
+      pinStuck.className = 'pin-stuck';
+      pinStuck.src = ASSETS.pinStuck;
+
+      pinStuck.style.width = PIN_STUCK_SIZE;
+      pinStuck.style.left = chatPoint.percentX + '%';
+      pinStuck.style.top = chatPoint.percentY + '%';
+
+      pinStuck.style.transform =
+        'translate(-50%, -50%)';
+
+      chatScreen.appendChild(pinStuck);
+    }
+
+  });
 }
 
 function showHomeMessage(text) {
@@ -160,6 +254,7 @@ function showChatScreen() {
   homeScreen.style.display = 'none';
   
   chatScreen.style.display = 'block';
+  loadSavedNeedlesToChat();
   chatScreen.querySelectorAll('.pain-dot').forEach(dot => dot.remove());
   chatScreen.querySelectorAll('.body-zone-outline').forEach(o => o.remove());
   chatScreen.querySelectorAll('.body-zone-label').forEach(l => l.remove());
@@ -173,20 +268,20 @@ function showChatScreen() {
   const currentUser = getCurrentUser();
   if (currentUser && currentUser.painPins && currentUser.painPins.length > 0) {
     const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
-    
-    const dot = document.createElement('img');
-    dot.className = 'pain-dot';
-    dot.src = ASSETS.painDot;
-    
-    if (latestPin.x !== undefined && latestPin.y !== undefined) {
-      const chatPoint = mapNormalizedPointToZone(latestPin, CHAT_BODY_ZONE);
+    if (!latestPin.completed && !latestPin.hasNeedle) {
+      const dot = document.createElement('img');
+      dot.className = 'pain-dot';
+      dot.src = ASSETS.painDot;
+      
+      if (latestPin.x !== undefined && latestPin.y !== undefined) {
+        const chatPoint = mapNormalizedPointToZone(latestPin, CHAT_BODY_ZONE);
 
-      dot.style.left = chatPoint.percentX + '%';
-      dot.style.top = chatPoint.percentY + '%';
+        dot.style.left = chatPoint.percentX + '%';
+        dot.style.top = chatPoint.percentY + '%';
 
-      chatScreen.appendChild(dot);
+        chatScreen.appendChild(dot);
+      }
     }
-    
   }
   
   if (SHOW_CHAT_BODY_ZONE) {

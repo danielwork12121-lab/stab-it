@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   initAuth();
+  initAudio();
   
   homeScreen.addEventListener('click', (e) => {
     const rect = homeScreen.getBoundingClientRect();

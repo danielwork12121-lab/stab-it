@@ -1,3 +1,5 @@
+const DEV_MODE = true;
+window.DEV_MODE = DEV_MODE;
 const SHOW_AUTH_HITBOXES = false;
 const SHOW_BODY_ZONE = false;
 const SHOW_CHAT_BODY_ZONE = false;
@@ -22,7 +24,10 @@ const ASSETS = {
   loginBg: '/assets/auth/login-bg.png',
   homeBg: '/assets/home/stuffy-home.JPG',
   chatBg: '/assets/chat/chat-background.JPG',
-  painDot: '/assets/chat/pain-dot.png'
+  painDot: '/assets/chat/pain-dot.png',
+  pinStuck: '/assets/pin/pin-stuck.png',
+  backgroundMusic: '/assets/audio/background-music.wav',
+  pinImpactSound: '/assets/audio/pin-impact.m4a'
 };
 
 const HOME_DAY_BADGE_POSITION = {
@@ -34,3 +39,7 @@ const CHAT_DAY_BADGE_POSITION = {
   left: '21%',
   top: '6.4%'
 };
+
+const PIN_STUCK_SIZE = '15%';
+const PIN_STUCK_OFFSET_X = 1.5;
+const PIN_STUCK_OFFSET_Y = -1.4;
