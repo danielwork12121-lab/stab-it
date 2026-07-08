@@ -19,6 +19,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   
+  chatScreen.addEventListener('click', (e) => {
+    if (window.STABIT_MODE === 'reviewNeedle') {
+      const rect = chatScreen.getBoundingClientRect();
+      const percentX = ((e.clientX - rect.left) / rect.width) * 100;
+      const percentY = ((e.clientY - rect.top) / rect.height) * 100;
+      
+      if (isInsideBodyZone(percentX, percentY)) {
+        showReviewPanel();
+      }
+    }
+  });
+  
   UserStorage.logout();
   showAuthScreen();
 });

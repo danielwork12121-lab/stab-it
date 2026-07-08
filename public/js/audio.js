@@ -8,10 +8,10 @@ const AudioManager = {
     try {
       this.bgm = new Audio(ASSETS.backgroundMusic);
       this.bgm.loop = true;
-      this.bgm.volume = 0.22;
+      this.bgm.volume = 0.2;
       
       this.impactAudio = new Audio(ASSETS.pinImpactSound);
-      this.impactAudio.volume = 0.75;
+      this.impactAudio.volume = 1.0;
       
       this.bgm.addEventListener('error', (e) => {
         if (DEV_MODE) console.error('[AUDIO] BGM load error:', e);
