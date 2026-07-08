@@ -27,7 +27,7 @@ const ASSETS = {
   painDot: '/assets/chat/pain-dot.png',
   pinStuck: '/assets/pin/pin-stuck.png',
   backgroundMusic: '/assets/audio/background-music.wav',
-  pinImpactSound: '/assets/audio/pin-impact.m4a'
+  pinImpactSound: '/assets/audio/pin-impact.qta'
 };
 
 const HOME_DAY_BADGE_POSITION = {
@@ -43,3 +43,7 @@ const CHAT_DAY_BADGE_POSITION = {
 const PIN_STUCK_SIZE = '15%';
 const PIN_STUCK_OFFSET_X = 1.5;
 const PIN_STUCK_OFFSET_Y = -1.4;
+
+const DEMO_FAST_FORWARD_DAYS = 3;
+const REVIEW_UNLOCK_DAYS = DEMO_FAST_FORWARD_DAYS;
+const NEEDLE_REVIEW_DAYS = DEMO_FAST_FORWARD_DAYS;

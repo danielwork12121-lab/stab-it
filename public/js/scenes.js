@@ -41,7 +41,157 @@ function getCompanionDays() {
   }
   
   const days = Math.floor((Date.now() - new Date(firstDate).getTime()) / 86400000) + 1;
-  return Math.max(1, days);
+  const offset = currentUser.companionDayOffset || 0;
+  return Math.max(1, days + offset);
+}
+
+function fastForwardCompanionDays(days) {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+  
+  currentUser.companionDayOffset = (currentUser.companionDayOffset || 0) + days;
+  UserStorage.updateUser(currentUser);
+  UserStorage.setCurrentUser(currentUser.username);
+}
+
+let reviewingPinId = null;
+window.reviewingPinId = reviewingPinId;
+
+function removeNeedle(pinId) {
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.painPins) return;
+  
+  const pinIndex = currentUser.painPins.findIndex(p => p.id === pinId);
+  if (pinIndex === -1) return;
+  
+  const removedPin = currentUser.painPins[pinIndex];
+  if (!removedPin || (!removedPin.completed && !removedPin.hasNeedle)) return;
+  
+  currentUser.painPins.splice(pinIndex, 1);
+  UserStorage.updateUser(currentUser);
+  UserStorage.setCurrentUser(currentUser.username);
+  
+  return removedPin;
+}
+window.removeNeedle = removeNeedle;
+
+function animateNeedleRemoval(pinElements) {
+  pinElements.forEach(pinEl => {
+    pinEl.classList.add('needle-fade-away');
+  });
+  
+  setTimeout(() => {
+    pinElements.forEach(pinEl => {
+      if (pinEl.parentNode) {
+        pinEl.parentNode.removeChild(pinEl);
+      }
+    });
+  }, 1200);
+}
+window.animateNeedleRemoval = animateNeedleRemoval;
+
+function findOldestCompletedNeedle() {
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.painPins) return null;
+  
+  return currentUser.painPins.find(p => p.completed || p.hasNeedle);
+}
+
+function restoreChatPanel() {
+  const existingPanel = chatScreen.querySelector('.summary-panel');
+  if (existingPanel) {
+    existingPanel.remove();
+  }
+  
+  if (window.showChatInterface) {
+    window.showChatInterface();
+  }
+}
+
+function showReviewPanel() {
+  const existingPanel = chatScreen.querySelector('.summary-panel');
+  if (existingPanel) {
+    existingPanel.remove();
+  }
+  
+  const reviewPanel = document.createElement('div');
+  reviewPanel.className = 'summary-panel';
+  
+  const message1 = document.createElement('div');
+  message1.className = 'summary-line primary';
+  message1.textContent = '这几天过去了。';
+  
+  const message2 = document.createElement('div');
+  message2.className = 'summary-line';
+  message2.textContent = '现在回头看，这份烦恼有没有变轻一点？';
+  message2.style.fontSize = '16px';
+  
+  const buttonsContainer = document.createElement('div');
+  buttonsContainer.className = 'summary-buttons';
+  
+  const readyBtn = document.createElement('button');
+  readyBtn.className = 'summary-btn';
+  readyBtn.textContent = '我准备放下了';
+  readyBtn.addEventListener('click', () => {
+    const oldestNeedle = findOldestCompletedNeedle();
+    if (oldestNeedle) {
+      reviewingPinId = oldestNeedle.id;
+      window.reviewingPinId = reviewingPinId;
+      
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        currentUser.reviewingPinId = oldestNeedle.id;
+        UserStorage.updateUser(currentUser);
+        UserStorage.setCurrentUser(currentUser.username);
+      }
+    }
+    
+    window.STABIT_CHAT_MODE = 'review';
+    restoreChatPanel();
+    
+    if (window.addMessage) {
+      window.addMessage('system', '—— 回看这根针 ——');
+      window.addMessage('bot', '能说出这句话已经很不容易了。那我们一起确认一下：这份烦恼，现在真的可以放下了吗？');
+    }
+  });
+  
+  const waitBtn = document.createElement('button');
+  waitBtn.className = 'summary-btn';
+  waitBtn.textContent = '我还想再等等';
+  waitBtn.addEventListener('click', () => {
+    const oldestNeedle = findOldestCompletedNeedle();
+    if (oldestNeedle) {
+      reviewingPinId = oldestNeedle.id;
+      window.reviewingPinId = reviewingPinId;
+      
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        currentUser.reviewingPinId = oldestNeedle.id;
+        UserStorage.updateUser(currentUser);
+        UserStorage.setCurrentUser(currentUser.username);
+      }
+    }
+    
+    window.STABIT_CHAT_MODE = 'review';
+    restoreChatPanel();
+    
+    if (window.addMessage) {
+      window.addMessage('system', '—— 回看这根针 ——');
+      window.addMessage('bot', '没关系，忧忧会再陪它一会儿。你可以再说说，现在最放不下的部分是什么？');
+    }
+  });
+  
+  buttonsContainer.appendChild(readyBtn);
+  buttonsContainer.appendChild(waitBtn);
+  
+  reviewPanel.appendChild(message1);
+  reviewPanel.appendChild(message2);
+  reviewPanel.appendChild(buttonsContainer);
+  chatScreen.appendChild(reviewPanel);
+  
+  setTimeout(() => {
+    reviewPanel.classList.add('show');
+  }, 50);
 }
 
 function createDayBadge(parent, position) {
@@ -144,18 +294,55 @@ function savePainDot(percentX, percentY) {
     const normalized = normalizePointInZone(percentX, percentY, STUFFY_BODY_ZONE);
 
     currentUser.painPins = currentUser.painPins || [];
-    currentUser.painPins.push({
+    
+    const newPin = {
+      id: 'pin-' + Date.now(),
       x: normalized.x,
       y: normalized.y,
-      createdAt: Date.now()
-    });
+      createdAt: Date.now(),
+      chatHistory: []
+    };
+    
+    currentUser.painPins.push(newPin);
+    currentUser.activePinId = newPin.id;
 
     UserStorage.updateUser(currentUser);
     UserStorage.setCurrentUser(currentUser.username);
   }
 }
 
+function migratePins() {
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.painPins || currentUser.painPins.length === 0) return;
+  
+  let needsSave = false;
+  
+  currentUser.painPins.forEach((pin, index) => {
+    if (!pin.id) {
+      pin.id = 'pin-' + (pin.createdAt || Date.now()) + '-' + index;
+      needsSave = true;
+    }
+    
+    if (!pin.chatHistory) {
+      pin.chatHistory = [];
+      needsSave = true;
+    }
+  });
+  
+  if (!currentUser.activePinId && currentUser.painPins.length > 0) {
+    currentUser.activePinId = currentUser.painPins[currentUser.painPins.length - 1].id;
+    needsSave = true;
+  }
+  
+  if (needsSave) {
+    UserStorage.updateUser(currentUser);
+    UserStorage.setCurrentUser(currentUser.username);
+  }
+}
+
 function loadSavedPainDots() {
+  migratePins();
+  
   removeExistingPainDots();
   homeScreen.querySelectorAll('.pin-stuck').forEach(p => p.remove());
   
@@ -187,6 +374,7 @@ function loadSavedPainDots() {
         const pinStuck = document.createElement('img');
         pinStuck.className = 'pin-stuck';
         pinStuck.src = ASSETS.pinStuck;
+        pinStuck.dataset.pinId = pin.id;
 
         pinStuck.style.width = "22%";
         pinStuck.style.left = homePoint.percentX + '%';
@@ -204,7 +392,8 @@ function loadSavedPainDots() {
 }
 
 function loadSavedNeedlesToChat() {
-
+  migratePins();
+  
   const currentUser = getCurrentUser();
 
   if (!currentUser || !currentUser.painPins) return;
@@ -224,6 +413,7 @@ function loadSavedNeedlesToChat() {
 
       pinStuck.className = 'pin-stuck';
       pinStuck.src = ASSETS.pinStuck;
+      pinStuck.dataset.pinId = pin.id;
 
       pinStuck.style.width = PIN_STUCK_SIZE;
       pinStuck.style.left = chatPoint.percentX + '%';
@@ -237,6 +427,7 @@ function loadSavedNeedlesToChat() {
 
   });
 }
+window.loadSavedNeedlesToChat = loadSavedNeedlesToChat;
 
 function showHomeMessage(text) {
   homeMessage.textContent = text;
@@ -247,6 +438,7 @@ function showHomeMessage(text) {
 }
 
 function goToChatScene() {
+  window.STABIT_CHAT_MODE = 'pinning';
   showChatScreen();
 }
 
