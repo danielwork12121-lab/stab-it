@@ -752,6 +752,8 @@ function removeReviewedNeedleWithAnimation() {
     return;
   }
 
+  currentUser.resolvedPins = currentUser.resolvedPins || [];
+
   let pinToRemove = null;
   let pinIndex = -1;
 
@@ -783,6 +785,48 @@ function removeReviewedNeedleWithAnimation() {
     chatPanel.classList.add('review-chat-fade-out');
   }
 
+  const archiveAndRemovePin = (user) => {
+    if (!user || !user.painPins) return;
+    
+    user.resolvedPins = user.resolvedPins || [];
+    
+    const resolvedPin = {
+      id: pinToRemove.id,
+      x: pinToRemove.x,
+      y: pinToRemove.y,
+      createdAt: pinToRemove.createdAt,
+      completed: pinToRemove.completed,
+      hasNeedle: false,
+      chatHistory: pinToRemove.chatHistory || [],
+      coreIssue: pinToRemove.coreIssue,
+      reflectionDays: pinToRemove.reflectionDays,
+      warmExplanation: pinToRemove.warmExplanation,
+      currentGuides: pinToRemove.currentGuides,
+      aiResult: pinToRemove.aiResult,
+      aiAnalyzed: pinToRemove.aiAnalyzed,
+      resolvedAt: Date.now(),
+      removedAt: Date.now(),
+      status: 'resolved'
+    };
+    
+    user.resolvedPins.push(resolvedPin);
+    
+    const freshIndex = user.painPins.findIndex(p => p.id === pinToRemove.id);
+    if (freshIndex !== -1) {
+      user.painPins.splice(freshIndex, 1);
+    }
+    
+    user.reviewingPinId = null;
+    UserStorage.updateUser(user);
+    UserStorage.setCurrentUser(user.username);
+    
+    if (DEV_MODE) {
+      console.log('[PIN DEBUG] Pin archived to resolvedPins:', pinToRemove.id);
+      console.log('[PIN DEBUG] resolvedPins count:', user.resolvedPins.length);
+      console.log('[PIN DEBUG] remaining painPins count:', user.painPins.length);
+    }
+  };
+
   setTimeout(() => {
     if (pinElement) {
       pinElement.classList.add('needle-fade-away');
@@ -793,15 +837,7 @@ function removeReviewedNeedleWithAnimation() {
         }
 
         const freshUser = getCurrentUser();
-        if (freshUser && freshUser.painPins) {
-          const freshIndex = freshUser.painPins.findIndex(p => p.id === pinToRemove.id);
-          if (freshIndex !== -1) {
-            freshUser.painPins.splice(freshIndex, 1);
-            freshUser.reviewingPinId = null;
-            UserStorage.updateUser(freshUser);
-            UserStorage.setCurrentUser(freshUser.username);
-          }
-        }
+        archiveAndRemovePin(freshUser);
 
         window.STABIT_CHAT_MODE = 'pinning';
         window.reviewingPinId = null;
@@ -819,15 +855,7 @@ function removeReviewedNeedleWithAnimation() {
       if (DEV_MODE) console.log('[PIN DEBUG] Matching DOM element not found, removing from storage only');
 
       const freshUser = getCurrentUser();
-      if (freshUser && freshUser.painPins) {
-        const freshIndex = freshUser.painPins.findIndex(p => p.id === pinToRemove.id);
-        if (freshIndex !== -1) {
-          freshUser.painPins.splice(freshIndex, 1);
-          freshUser.reviewingPinId = null;
-          UserStorage.updateUser(freshUser);
-          UserStorage.setCurrentUser(freshUser.username);
-        }
-      }
+      archiveAndRemovePin(freshUser);
 
       if (window.loadSavedNeedlesToChat) {
         window.loadSavedNeedlesToChat();

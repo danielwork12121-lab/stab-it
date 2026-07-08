@@ -59,6 +59,7 @@ const UserStorage = {
       createdAt: Date.now(),
       companionDays: 1,
       painPins: [],
+      resolvedPins: [],
       chatHistory: [],
       settings: {},
       progression: {}

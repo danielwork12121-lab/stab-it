@@ -114,16 +114,34 @@ function showReviewPanel() {
     existingPanel.remove();
   }
   
+  const oldestNeedle = findOldestCompletedNeedle();
+  if (!oldestNeedle) return;
+  
+  let issueText = oldestNeedle.coreIssue || '';
+  if (!issueText && oldestNeedle.chatHistory && oldestNeedle.chatHistory.length > 0) {
+    const firstUserMsg = oldestNeedle.chatHistory.find(msg => msg.sender === 'user');
+    if (firstUserMsg) {
+      issueText = firstUserMsg.text.substring(0, 20);
+      if (firstUserMsg.text.length > 20) {
+        issueText += '...';
+      }
+    }
+  }
+  
+  if (!issueText) {
+    issueText = '一份未说出口的烦恼';
+  }
+  
   const reviewPanel = document.createElement('div');
   reviewPanel.className = 'summary-panel';
   
   const message1 = document.createElement('div');
   message1.className = 'summary-line primary';
-  message1.textContent = '这几天过去了。';
+  message1.textContent = `上次这根针里，你放下的是：${issueText}。`;
   
   const message2 = document.createElement('div');
   message2.className = 'summary-line';
-  message2.textContent = '现在回头看，这份烦恼有没有变轻一点？';
+  message2.textContent = '现在回头看，它还像那天一样刺痛吗？';
   message2.style.fontSize = '16px';
   
   const buttonsContainer = document.createElement('div');
@@ -133,20 +151,21 @@ function showReviewPanel() {
   readyBtn.className = 'summary-btn';
   readyBtn.textContent = '我准备放下了';
   readyBtn.addEventListener('click', () => {
-    const oldestNeedle = findOldestCompletedNeedle();
-    if (oldestNeedle) {
-      reviewingPinId = oldestNeedle.id;
-      window.reviewingPinId = reviewingPinId;
-      
-      const currentUser = getCurrentUser();
-      if (currentUser) {
-        currentUser.reviewingPinId = oldestNeedle.id;
-        UserStorage.updateUser(currentUser);
-        UserStorage.setCurrentUser(currentUser.username);
-      }
+    reviewingPinId = oldestNeedle.id;
+    window.reviewingPinId = reviewingPinId;
+    
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      currentUser.reviewingPinId = oldestNeedle.id;
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
     }
     
     window.STABIT_CHAT_MODE = 'review';
+    oldestNeedle.reviewIntroShown = true;
+    oldestNeedle.reviewStartedAt = Date.now();
+    UserStorage.updateUser(getCurrentUser());
+    
     restoreChatPanel();
     
     if (window.addMessage) {
@@ -159,20 +178,21 @@ function showReviewPanel() {
   waitBtn.className = 'summary-btn';
   waitBtn.textContent = '我还想再等等';
   waitBtn.addEventListener('click', () => {
-    const oldestNeedle = findOldestCompletedNeedle();
-    if (oldestNeedle) {
-      reviewingPinId = oldestNeedle.id;
-      window.reviewingPinId = reviewingPinId;
-      
-      const currentUser = getCurrentUser();
-      if (currentUser) {
-        currentUser.reviewingPinId = oldestNeedle.id;
-        UserStorage.updateUser(currentUser);
-        UserStorage.setCurrentUser(currentUser.username);
-      }
+    reviewingPinId = oldestNeedle.id;
+    window.reviewingPinId = reviewingPinId;
+    
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      currentUser.reviewingPinId = oldestNeedle.id;
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
     }
     
     window.STABIT_CHAT_MODE = 'review';
+    oldestNeedle.reviewIntroShown = true;
+    oldestNeedle.reviewStartedAt = Date.now();
+    UserStorage.updateUser(getCurrentUser());
+    
     restoreChatPanel();
     
     if (window.addMessage) {
@@ -294,6 +314,7 @@ function savePainDot(percentX, percentY) {
     const normalized = normalizePointInZone(percentX, percentY, STUFFY_BODY_ZONE);
 
     currentUser.painPins = currentUser.painPins || [];
+    currentUser.resolvedPins = currentUser.resolvedPins || [];
     
     const newPin = {
       id: 'pin-' + Date.now(),
@@ -305,6 +326,14 @@ function savePainDot(percentX, percentY) {
     
     currentUser.painPins.push(newPin);
     currentUser.activePinId = newPin.id;
+    currentUser.reviewingPinId = null;
+    
+    window.reviewingPinId = null;
+    window.STABIT_CHAT_MODE = 'pinning';
+    
+    if (DEV_MODE) {
+      console.log('[PIN DEBUG] New pin created, reviewingPinId cleared');
+    }
 
     UserStorage.updateUser(currentUser);
     UserStorage.setCurrentUser(currentUser.username);
@@ -313,9 +342,19 @@ function savePainDot(percentX, percentY) {
 
 function migratePins() {
   const currentUser = getCurrentUser();
-  if (!currentUser || !currentUser.painPins || currentUser.painPins.length === 0) return;
+  if (!currentUser) return;
   
   let needsSave = false;
+  
+  if (!currentUser.resolvedPins) {
+    currentUser.resolvedPins = [];
+    needsSave = true;
+  }
+  
+  if (!currentUser.painPins) {
+    currentUser.painPins = [];
+    needsSave = true;
+  }
   
   currentUser.painPins.forEach((pin, index) => {
     if (!pin.id) {
