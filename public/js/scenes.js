@@ -251,9 +251,14 @@ function createDayBadge(parent, position) {
 injectDayBadgeStyles();
 
 function showAuthScreen() {
+  if (DEV_MODE) {
+    console.log('[SCREEN DEBUG] showAuthScreen - hiding home/chat, showing auth');
+  }
+  
   phoneCanvas.style.display = 'block';
   homeScreen.style.display = 'none';
   chatScreen.style.display = 'none';
+  chatScreen.classList.remove('show');
 }
 
 function showHomeScreen() {
@@ -263,10 +268,12 @@ function showHomeScreen() {
     const currentUser = getCurrentUser();
     console.log('[PIN DEBUG] showHomeScreen - currentUser:', currentUser?.username);
     console.log('[PIN DEBUG] showHomeScreen - painPins count:', currentUser?.painPins?.length || 0);
+    console.log('[SCREEN DEBUG] showHomeScreen - hiding auth/chat, showing home');
   }
   
   phoneCanvas.style.display = 'none';
   chatScreen.style.display = 'none';
+  chatScreen.classList.remove('show');
   homeScreen.style.display = 'block';
   
   chatScreen.querySelectorAll('.chat-panel').forEach(p => p.remove());
@@ -492,6 +499,11 @@ function goToChatScene() {
 }
 
 function showChatScreen() {
+  if (DEV_MODE) {
+    console.log('[SCREEN DEBUG] showChatScreen - hiding auth/home, showing chat');
+  }
+  
+  phoneCanvas.style.display = 'none';
   homeScreen.style.display = 'none';
   
   chatScreen.style.display = 'block';

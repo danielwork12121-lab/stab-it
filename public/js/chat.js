@@ -508,19 +508,34 @@ async function sendMessage() {
   setChatControlsDisabled(true);
   
   try {
+    if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Calling /api/ai/chat first with mode:', mode);
+    
+    await callAIChat(text, { loadingMsg });
+    
+    if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] /api/ai/chat completed, visible reply shown');
+    
     if (mode === 'pinning') {
-      if (chatPin && !chatPin.aiAnalyzed && !chatPin.aiAnalyzing) {
-        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Pinning mode, first message - calling analyzeWorryWithAI');
-        chatPin.aiAnalyzing = true;
-        await analyzeWorryWithAI(text);
-        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] analyzeWorryWithAI completed, calling callAIChat');
-      } else {
-        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Pinning mode, already analyzed - calling callAIChat directly');
+      const freshPin = getCurrentChatPin();
+      if (freshPin && !freshPin.aiAnalyzed && !freshPin.aiAnalyzing) {
+        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Starting background analyze-worry');
+        
+        const currentUser = getCurrentUser();
+        if (currentUser) {
+          const targetPin = currentUser.painPins.find(p => p.id === freshPin.id);
+          if (targetPin) {
+            targetPin.aiAnalyzing = true;
+            UserStorage.updateUser(currentUser);
+            UserStorage.setCurrentUser(currentUser.username);
+          }
+        }
+        
+        analyzeWorryWithAI(text).catch(err => {
+          if (DEV_MODE) console.warn('[AI DEBUG] Background analyze-worry failed:', err);
+        });
+      } else if (DEV_MODE && freshPin && freshPin.aiAnalyzed) {
+        console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already saved from chat response');
       }
     }
-
-    if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Calling /api/ai/chat with mode:', mode);
-    await callAIChat(text, { loadingMsg });
   } finally {
     isChatRequestInFlight = false;
     setChatControlsDisabled(false);
@@ -574,11 +589,6 @@ async function analyzeWorryWithAI(userText) {
     };
     
     await processAIResult(fallbackResult);
-  } finally {
-    const pin = getCurrentChatPin();
-    if (pin) {
-      pin.aiAnalyzing = false;
-    }
   }
 }
 
@@ -698,7 +708,8 @@ async function callAIChat(userText, options = {}) {
     processChatAIResponse({
       reply: aiResponse.reply,
       readyToPin: !!aiResponse.readyToPin,
-      readyToRemove: !!aiResponse.readyToRemove
+      readyToRemove: !!aiResponse.readyToRemove,
+      analysis: aiResponse.analysis
     });
     return true;
     
@@ -707,7 +718,9 @@ async function callAIChat(userText, options = {}) {
       console.warn('[AI CHAT DEBUG] =========================');
       console.warn('[AI CHAT DEBUG] API call FAILED!');
       console.warn('[AI CHAT DEBUG] Error:', error.message);
-      console.warn('[AI CHAT DEBUG] Falling back to mock reply');
+      console.warn('[AI CHAT DEBUG] Error name:', error.name);
+      console.warn('[AI CHAT DEBUG] Error stack:', error.stack);
+      console.warn('[AI CHAT DEBUG] Falling back to local reply');
     }
 
     const fallbackReply = mode === 'pinning' 
@@ -733,25 +746,80 @@ function processChatAIResponse(aiResponse) {
     console.log('[AI RESPONSE DEBUG] Reply:', aiResponse.reply);
     console.log('[AI RESPONSE DEBUG] readyToPin:', aiResponse.readyToPin);
     console.log('[AI RESPONSE DEBUG] readyToRemove:', aiResponse.readyToRemove);
+    console.log('[AI RESPONSE DEBUG] Has analysis:', !!aiResponse.analysis);
     console.log('[AI RESPONSE DEBUG] Mode:', mode);
   }
   
   addMessage('bot', aiResponse.reply);
   saveMessage('bot', aiResponse.reply);
   
+  if (aiResponse.analysis) {
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      const chatPin = getCurrentChatPin();
+      if (chatPin) {
+        const targetPin = currentUser.painPins.find(p => p.id === chatPin.id);
+        if (targetPin) {
+          targetPin.coreIssue = aiResponse.analysis.coreIssue;
+          targetPin.reflectionDays = aiResponse.analysis.reflectionDays;
+          targetPin.warmExplanation = aiResponse.analysis.warmExplanation;
+          targetPin.currentGuides = aiResponse.analysis.currentGuides;
+          targetPin.aiResult = aiResponse.analysis;
+          targetPin.aiAnalyzed = true;
+          targetPin.aiAnalyzing = false;
+          
+          if (DEV_MODE) {
+            console.log('[AI RESPONSE DEBUG] Analysis saved to pin:', targetPin.id, 'coreIssue:', aiResponse.analysis.coreIssue);
+          }
+          
+          UserStorage.updateUser(currentUser);
+          UserStorage.setCurrentUser(currentUser.username);
+        }
+      }
+    }
+  }
+  
+  const currentUser = getCurrentUser();
+  
   if (mode === 'pinning' && aiResponse.readyToPin) {
-    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] Pin is ready to pin, showing hint');
+    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToPin true, showing "交给忧忧" button');
+    
+    if (currentUser) {
+      currentUser.pendingAction = 'pin';
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+    }
+    
     setTimeout(() => {
-      addMessage('bot', '如果你准备好了，可以输入 go，把这件事交给忧忧。');
-      saveMessage('bot', '如果你准备好了，可以输入 go，把这件事交给忧忧。');
+      addActionButton('交给忧忧', () => {
+        if (currentUser) {
+          currentUser.pendingAction = null;
+          UserStorage.updateUser(currentUser);
+          UserStorage.setCurrentUser(currentUser.username);
+        }
+        beginPinCeremony();
+      });
     }, 300);
   }
   
   if (mode === 'review' && aiResponse.readyToRemove) {
-    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] Pin is ready to remove, showing hint');
+    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToRemove true, showing "轻轻取下这根针" button');
+    
+    if (currentUser) {
+      currentUser.pendingAction = 'remove';
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+    }
+    
     setTimeout(() => {
-      addMessage('bot', '如果你真的准备好了，可以输入 yes，轻轻取下这根针。');
-      saveMessage('bot', '如果你真的准备好了，可以输入 yes，轻轻取下这根针。');
+      addActionButton('轻轻取下这根针', () => {
+        if (currentUser) {
+          currentUser.pendingAction = null;
+          UserStorage.updateUser(currentUser);
+          UserStorage.setCurrentUser(currentUser.username);
+        }
+        removeReviewedNeedleWithAnimation();
+      });
     }, 300);
   }
 }
@@ -999,6 +1067,28 @@ function addMessage(sender, text) {
 }
 window.addMessage = addMessage;
 
+function addActionButton(label, onClick) {
+  const existingButtons = chatLog.querySelectorAll('.chat-action-button');
+  existingButtons.forEach(btn => btn.remove());
+  
+  const buttonEl = document.createElement('button');
+  buttonEl.className = 'chat-action-button';
+  buttonEl.textContent = label;
+  buttonEl.addEventListener('click', onClick);
+  
+  const wrapper = document.createElement('div');
+  wrapper.className = 'chat-action-wrapper';
+  wrapper.appendChild(buttonEl);
+  
+  chatLog.appendChild(wrapper);
+  scrollToBottom();
+  
+  if (DEV_MODE) console.log('[CHAT DEBUG] addActionButton() - label:', label);
+  
+  return buttonEl;
+}
+window.addActionButton = addActionButton;
+
 function scrollToBottom() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
@@ -1061,10 +1151,23 @@ function saveMessage(sender, text) {
 }
 
 function loadPinChatHistory(pin) {
-  if (!pin || !pin.chatHistory || pin.chatHistory.length === 0) {
+  if (!pin) {
+    if (DEV_MODE) console.log('[CHAT LOAD DEBUG] loadPinChatHistory: no pin provided');
+    addMessage('bot', GREETING_MESSAGE);
+    saveMessage('bot', GREETING_MESSAGE);
+    return;
+  }
+
+  if (!pin.chatHistory || pin.chatHistory.length === 0) {
+    if (DEV_MODE) console.log('[CHAT LOAD DEBUG] loadPinChatHistory: empty chatHistory, adding greeting');
     addMessage('bot', GREETING_MESSAGE);
     saveMessageToPin(pin, 'bot', GREETING_MESSAGE);
     return;
+  }
+
+  if (DEV_MODE) {
+    console.log('[CHAT LOAD DEBUG] loadPinChatHistory: chatHistory exists, length:', pin.chatHistory.length);
+    console.log('[CHAT LOAD DEBUG] loadPinChatHistory: skipping greeting - existing chat found');
   }
 
   const visibleMessages = pin.chatHistory.filter(msg => {
@@ -1072,11 +1175,13 @@ function loadPinChatHistory(pin) {
   });
 
   if (visibleMessages.length === 0) {
+    if (DEV_MODE) console.log('[CHAT LOAD DEBUG] loadPinChatHistory: all messages filtered out, adding greeting');
     addMessage('bot', GREETING_MESSAGE);
     saveMessageToPin(pin, 'bot', GREETING_MESSAGE);
     return;
   }
 
+  if (DEV_MODE) console.log('[CHAT LOAD DEBUG] loadPinChatHistory: rendering', visibleMessages.length, 'visible messages');
   visibleMessages.forEach(msg => {
     addMessage(msg.sender, msg.text);
   });
