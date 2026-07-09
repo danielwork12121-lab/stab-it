@@ -1571,11 +1571,11 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   wrapper.className = 'chat-review-choice-wrapper';
   
   const continueBtn = document.createElement('button');
-  continueBtn.className = 'chat-review-choice-button';
+  continueBtn.className = 'chat-action-button';
   continueBtn.textContent = '继续聊聊';
   continueBtn.addEventListener('click', () => {
     if (DEV_MODE) console.log('[CHAT DEBUG] "继续聊聊" clicked');
-    const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
+    const existingButtons = chatLog.querySelectorAll('.chat-action-button');
     existingButtons.forEach(btn => btn.remove());
     
     const currentUser = getCurrentUser();
@@ -1588,7 +1588,7 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   });
   
   const rescheduleBtn = document.createElement('button');
-  rescheduleBtn.className = 'chat-review-choice-button';
+  rescheduleBtn.className = 'chat-action-button';
   rescheduleBtn.textContent = `${nextReflectionDays}天后再看看`;
   rescheduleBtn.addEventListener('click', () => {
     rescheduleReview(nextReflectionDays, reviewData);
@@ -1599,6 +1599,8 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   
   chatLog.appendChild(wrapper);
   scrollToBottom();
+  
+  if (DEV_MODE) console.log('[CHAT DEBUG] styled review action buttons rendered');
 }
 window.addReviewChoiceButtons = addReviewChoiceButtons;
 
