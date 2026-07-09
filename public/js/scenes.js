@@ -54,6 +54,10 @@ function fastForwardCompanionDays(days) {
   UserStorage.setCurrentUser(currentUser.username);
 }
 
+function getCurrentCompanionDay() {
+  return getCompanionDays();
+}
+
 let reviewingPinId = null;
 window.reviewingPinId = reviewingPinId;
 
@@ -109,6 +113,11 @@ function restoreChatPanel() {
 }
 
 function showReviewPanel() {
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] =========================');
+    console.log('[REVIEW DEBUG] showReviewPanel called');
+  }
+  
   const existingPanel = chatScreen.querySelector('.summary-panel');
   if (existingPanel) {
     existingPanel.remove();
@@ -116,6 +125,10 @@ function showReviewPanel() {
   
   const oldestNeedle = findOldestCompletedNeedle();
   if (!oldestNeedle) return;
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] pin id:', oldestNeedle.id);
+  }
   
   let issueText = oldestNeedle.coreIssue || '';
   if (!issueText && oldestNeedle.chatHistory && oldestNeedle.chatHistory.length > 0) {
@@ -129,99 +142,240 @@ function showReviewPanel() {
   }
   
   if (!issueText) {
-    issueText = '一份未说出口的烦恼';
+    issueText = oldestNeedle.warmExplanation || '这件事还需要被安放';
+  }
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] coreIssue used:', issueText);
   }
   
   const reviewPanel = document.createElement('div');
   reviewPanel.className = 'summary-panel';
   
-  const message1 = document.createElement('div');
-  message1.className = 'summary-line primary';
-  message1.textContent = `上次这根针里，你放下的是：${issueText}。`;
+  const introLine = document.createElement('div');
+  introLine.className = 'summary-line';
+  introLine.textContent = '扎下这根针时，你写下的是：';
+  introLine.style.fontSize = '14px';
+  introLine.style.color = '#888';
   
-  const message2 = document.createElement('div');
-  message2.className = 'summary-line';
-  message2.textContent = '现在回头看，它还像那天一样刺痛吗？';
-  message2.style.fontSize = '16px';
+  const coreIssueLine = document.createElement('div');
+  coreIssueLine.className = 'summary-line core-issue';
+  coreIssueLine.textContent = issueText;
+  coreIssueLine.style.fontSize = '20px';
+  coreIssueLine.style.fontWeight = '600';
+  coreIssueLine.style.marginTop = '8px';
+  coreIssueLine.style.marginBottom = '12px';
+  
+  const questionLine = document.createElement('div');
+  questionLine.className = 'summary-line';
+  questionLine.textContent = '现在，它还影响着你的情绪吗？';
+  questionLine.style.fontSize = '16px';
+  questionLine.style.marginTop = '16px';
   
   const buttonsContainer = document.createElement('div');
   buttonsContainer.className = 'summary-buttons';
   
-  const readyBtn = document.createElement('button');
-    readyBtn.className = 'summary-btn';
-    readyBtn.textContent = '我准备放下了';
-    readyBtn.addEventListener('click', () => {
-      const pinId = oldestNeedle.id;
-      reviewingPinId = pinId;
-      window.reviewingPinId = pinId;
-      
-      const currentUser = getCurrentUser();
-      if (currentUser) {
-        currentUser.reviewingPinId = pinId;
-        
-        const targetPin = currentUser.painPins.find(p => p.id === pinId);
-        if (targetPin) {
-          targetPin.reviewIntroShown = true;
-          targetPin.reviewStartedAt = Date.now();
-        }
-        
-        UserStorage.updateUser(currentUser);
-        UserStorage.setCurrentUser(currentUser.username);
-      }
-      
-      window.STABIT_CHAT_MODE = 'review';
-      
-      restoreChatPanel();
-      
-      if (window.addMessage) {
-        window.addMessage('system', '—— 回看这根针 ——');
-        window.addMessage('bot', '能说出这句话已经很不容易了。那我们一起确认一下：这份烦恼，现在真的可以放下了吗？');
-      }
-    });
+  const enterReviewBtn = document.createElement('button');
+  enterReviewBtn.className = 'summary-btn';
+  enterReviewBtn.textContent = '会，它还会影响我';
+  enterReviewBtn.addEventListener('click', () => {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 1 clicked: "会，它还会影响我"');
+    enterReviewChat(oldestNeedle.id, '会，它还会影响我。');
+  });
   
-  const waitBtn = document.createElement('button');
-    waitBtn.className = 'summary-btn';
-    waitBtn.textContent = '我还想再等等';
-    waitBtn.addEventListener('click', () => {
-      const pinId = oldestNeedle.id;
-      reviewingPinId = pinId;
-      window.reviewingPinId = pinId;
-      
-      const currentUser = getCurrentUser();
-      if (currentUser) {
-        currentUser.reviewingPinId = pinId;
-        
-        const targetPin = currentUser.painPins.find(p => p.id === pinId);
-        if (targetPin) {
-          targetPin.reviewIntroShown = true;
-          targetPin.reviewStartedAt = Date.now();
-        }
-        
-        UserStorage.updateUser(currentUser);
-        UserStorage.setCurrentUser(currentUser.username);
-      }
-      
-      window.STABIT_CHAT_MODE = 'review';
-      
-      restoreChatPanel();
-      
-      if (window.addMessage) {
-        window.addMessage('system', '—— 回看这根针 ——');
-        window.addMessage('bot', '没关系，忧忧会再陪它一会儿。你可以再说说，现在最放不下的部分是什么？');
-      }
-    });
+  const partialReviewBtn = document.createElement('button');
+  partialReviewBtn.className = 'summary-btn';
+  partialReviewBtn.textContent = '有一点儿，但是没当时那么难受了';
+  partialReviewBtn.addEventListener('click', () => {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 2 clicked: "有一点儿，但是没当时那么难受了"');
+    enterReviewChat(oldestNeedle.id, '有一点儿，但是没当时那么难受了。');
+  });
   
-  buttonsContainer.appendChild(readyBtn);
-  buttonsContainer.appendChild(waitBtn);
+  const readyToRemoveBtn = document.createElement('button');
+  readyToRemoveBtn.className = 'summary-btn';
+  readyToRemoveBtn.textContent = '不会了，好像已经忘记这件事儿了';
+  readyToRemoveBtn.addEventListener('click', () => {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 3 clicked: "不会了，好像已经忘记这件事儿了"');
+    directRemoveNeedle(oldestNeedle.id);
+  });
   
-  reviewPanel.appendChild(message1);
-  reviewPanel.appendChild(message2);
+  buttonsContainer.appendChild(enterReviewBtn);
+  buttonsContainer.appendChild(partialReviewBtn);
+  buttonsContainer.appendChild(readyToRemoveBtn);
+  
+  reviewPanel.appendChild(introLine);
+  reviewPanel.appendChild(coreIssueLine);
+  reviewPanel.appendChild(questionLine);
   reviewPanel.appendChild(buttonsContainer);
   chatScreen.appendChild(reviewPanel);
   
   setTimeout(() => {
     reviewPanel.classList.add('show');
   }, 50);
+}
+
+function enterReviewChat(pinId, contextMessage) {
+  if (DEV_MODE) console.log('[REVIEW DEBUG] enterReviewChat - pinId:', pinId, 'context:', contextMessage);
+  
+  reviewingPinId = pinId;
+  window.reviewingPinId = pinId;
+  
+  const currentUser = getCurrentUser();
+  if (currentUser) {
+    currentUser.reviewingPinId = pinId;
+    currentUser.reviewStage = 'initial_review_analysis';
+    currentUser.pendingReviewChoice = contextMessage;
+    
+    const targetPin = currentUser.painPins.find(p => p.id === pinId);
+    if (targetPin) {
+      targetPin.reviewIntroShown = true;
+      targetPin.reviewStartedAt = Date.now();
+    }
+    
+    UserStorage.updateUser(currentUser);
+    UserStorage.setCurrentUser(currentUser.username);
+  }
+  
+  window.STABIT_CHAT_MODE = 'review';
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] STABIT_MODE before clearing:', window.STABIT_MODE);
+  }
+  window.STABIT_MODE = null;
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] STABIT_MODE after clearing:', window.STABIT_MODE);
+  }
+  
+  restoreChatPanel();
+  
+  if (window.addMessage) {
+    window.addMessage('system', '—— 回看这根针 ——');
+  }
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] Auto-calling AI after pre-review choice');
+    console.log('[REVIEW DEBUG] reviewStage:', currentUser?.reviewStage);
+    console.log('[REVIEW DEBUG] pendingReviewChoice:', contextMessage);
+  }
+  
+  setTimeout(() => {
+    if (window.sendAutoReviewMessage) {
+      window.sendAutoReviewMessage(contextMessage);
+    } else {
+      if (DEV_MODE) console.error('[REVIEW DEBUG] ERROR: window.sendAutoReviewMessage does not exist');
+    }
+  }, 600);
+}
+
+function directRemoveNeedle(pinId) {
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] =========================');
+    console.log('[REVIEW DEBUG] directRemoveNeedle called - pinId:', pinId);
+  }
+  
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.painPins) {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] No user or painPins found');
+    return;
+  }
+  
+  currentUser.resolvedPins = currentUser.resolvedPins || [];
+  
+  const pinIndex = currentUser.painPins.findIndex(p => p.id === pinId);
+  if (pinIndex === -1) {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Pin not found:', pinId);
+    return;
+  }
+  
+  const pinToRemove = currentUser.painPins[pinIndex];
+  
+  if (DEV_MODE) console.log('[REVIEW DEBUG] Direct remove - pin:', pinToRemove.id);
+  
+  const chatPanel = chatScreen.querySelector('.chat-panel');
+  const pinElement = chatScreen.querySelector(`.pin-stuck[data-pin-id="${pinToRemove.id}"]`);
+  
+  if (chatPanel) {
+    chatPanel.classList.add('review-chat-fade-out');
+  }
+  
+  const archiveAndRemovePin = (user) => {
+    if (!user || !user.painPins) return;
+    
+    user.resolvedPins = user.resolvedPins || [];
+    
+    const resolvedPin = {
+      id: pinToRemove.id,
+      x: pinToRemove.x,
+      y: pinToRemove.y,
+      createdAt: pinToRemove.createdAt,
+      completed: pinToRemove.completed,
+      hasNeedle: false,
+      chatHistory: pinToRemove.chatHistory || [],
+      coreIssue: pinToRemove.coreIssue,
+      reflectionDays: pinToRemove.reflectionDays,
+      warmExplanation: pinToRemove.warmExplanation,
+      currentGuides: pinToRemove.currentGuides,
+      aiResult: pinToRemove.aiResult,
+      aiAnalyzed: pinToRemove.aiAnalyzed,
+      resolvedAt: Date.now(),
+      removedAt: Date.now(),
+      status: 'resolved'
+    };
+    
+    user.resolvedPins.push(resolvedPin);
+    
+    const freshIndex = user.painPins.findIndex(p => p.id === pinToRemove.id);
+    if (freshIndex !== -1) {
+      user.painPins.splice(freshIndex, 1);
+    }
+    
+    const oldActivePinId = user.activePinId;
+    if (user.activePinId === pinToRemove.id) {
+      user.activePinId = null;
+    }
+    
+    user.reviewingPinId = null;
+    user.pendingAction = null;
+    user.pendingReviewAction = null;
+    UserStorage.updateUser(user);
+    UserStorage.setCurrentUser(user.username);
+    
+    if (DEV_MODE) {
+      console.log('[REVIEW DEBUG] Pin archived to resolvedPins:', pinToRemove.id);
+      console.log('[REVIEW DEBUG] old activePinId:', oldActivePinId);
+      console.log('[REVIEW DEBUG] new activePinId:', user.activePinId);
+      console.log('[REVIEW DEBUG] reviewingPinId cleared:', user.reviewingPinId);
+      console.log('[REVIEW DEBUG] resolvedPins count:', user.resolvedPins.length);
+      console.log('[REVIEW DEBUG] remaining painPins count:', user.painPins.length);
+    }
+  };
+  
+  setTimeout(() => {
+    if (pinElement) {
+      pinElement.classList.add('needle-fade-away');
+      
+      setTimeout(() => {
+        if (pinElement.parentNode) {
+          pinElement.parentNode.removeChild(pinElement);
+        }
+        
+        const freshUser = getCurrentUser();
+        archiveAndRemovePin(freshUser);
+        
+        setTimeout(() => {
+          showHomeScreen();
+        }, 500);
+      }, 1500);
+    } else {
+      if (DEV_MODE) console.log('[REVIEW DEBUG] No DOM needle found, removing from storage only');
+      const freshUser = getCurrentUser();
+      archiveAndRemovePin(freshUser);
+      setTimeout(() => {
+        showHomeScreen();
+      }, 500);
+    }
+  }, 500);
 }
 
 function createDayBadge(parent, position) {

@@ -24,7 +24,8 @@ const PIN_STUCK_ROTATION = '0deg';
 const EPHEMERAL_BOT_MESSAGES = new Set([
   '…',
   '...',
-  '忧忧正在帮你整理这件事...'
+  '忧忧正在帮你整理这件事...',
+  '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。'
 ]);
 
 let chatSendBtn = null;
@@ -312,23 +313,26 @@ function injectChatStyles() {
     
     .summary-buttons {
       display: flex;
+      flex-direction: column;
       gap: 12px;
-      margin-top: auto;
+      margin-top: 20px;
       padding-bottom: 10px;
+      width: 100%;
     }
     
     .summary-btn {
-      padding: 12px 28px;
+      padding: 16px 24px;
       border: none;
-      border-radius: 25px;
-      font-size: 15px;
+      border-radius: 12px;
+      font-size: 16px;
       font-weight: 500;
       color: white;
       cursor: pointer;
       background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
       box-shadow: 0 4px 15px rgba(155, 89, 182, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
       transition: all 0.2s ease;
-      min-width: 120px;
+      width: 100%;
+      text-align: center;
     }
     
     .summary-btn:hover {
@@ -455,6 +459,62 @@ function handleChatInput(e) {
   }
 }
 
+async function sendAutoReviewMessage(text) {
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] =========================');
+    console.log('[REVIEW DEBUG] sendAutoReviewMessage called');
+    console.log('[REVIEW DEBUG] text:', text);
+    console.log('[REVIEW DEBUG] STABIT_CHAT_MODE:', window.STABIT_CHAT_MODE);
+  }
+  
+  if (!text) {
+    if (DEV_MODE) console.warn('[REVIEW DEBUG] sendAutoReviewMessage called with empty text');
+    return;
+  }
+  
+  if (window.STABIT_CHAT_MODE !== 'review') {
+    if (DEV_MODE) console.warn('[REVIEW DEBUG] sendAutoReviewMessage called but mode is not review');
+    return;
+  }
+  
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.reviewingPinId) {
+    if (DEV_MODE) console.warn('[REVIEW DEBUG] sendAutoReviewMessage called but no reviewingPinId');
+    return;
+  }
+  
+  if (isChatRequestInFlight) {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] sendAutoReviewMessage - ignoring, request in flight');
+    return;
+  }
+  
+  const chatPin = getCurrentChatPin();
+  if (!chatPin) {
+    if (DEV_MODE) console.warn('[REVIEW DEBUG] sendAutoReviewMessage called but no chat pin');
+    return;
+  }
+  
+  addMessage('user', text);
+  saveMessage('user', text);
+  
+  const loadingMsg = addMessage('bot', '…');
+  isChatRequestInFlight = true;
+  setChatControlsDisabled(true);
+  
+  try {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Auto /api/ai/chat started');
+    
+    await callAIChat(text, { loadingMsg });
+    
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Auto /api/ai/chat response received');
+    
+  } finally {
+    isChatRequestInFlight = false;
+    setChatControlsDisabled(false);
+  }
+}
+window.sendAutoReviewMessage = sendAutoReviewMessage;
+
 async function sendMessage() {
   if (isChatRequestInFlight) {
     if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Ignoring send while request is in flight');
@@ -501,6 +561,17 @@ async function sendMessage() {
     if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Special command: yes');
     removeReviewedNeedleWithAnimation();
     return;
+  }
+  
+  if (mode === 'review' && currentUser) {
+    if (currentUser.reviewStage === 'awaiting_user_reason') {
+      currentUser.reviewStage = 'followup_response';
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+      if (DEV_MODE) {
+        console.log('[SEND MESSAGE DEBUG] reviewStage changed from awaiting_user_reason to followup_response');
+      }
+    }
   }
 
   const loadingMsg = addMessage('bot', '…');
@@ -629,9 +700,12 @@ async function processAIResult(aiResult) {
   }
 }
 
+const AI_CHAT_TIMEOUT_MS = 180000;
+
 async function callAIChat(userText, options = {}) {
   const pin = getCurrentChatPin();
   const mode = window.STABIT_CHAT_MODE;
+  const startTime = Date.now();
   
   if (DEV_MODE) {
     console.log('[AI CHAT DEBUG] =========================');
@@ -640,27 +714,53 @@ async function callAIChat(userText, options = {}) {
     console.log('[AI CHAT DEBUG] Pin ID:', pin?.id);
     console.log('[AI CHAT DEBUG] User text:', userText.substring(0, 50));
     console.log('[AI CHAT DEBUG] Chat history length:', pin?.chatHistory?.length || 0);
+    console.log('[AI CHAT DEBUG] AI_CHAT_TIMEOUT_MS:', AI_CHAT_TIMEOUT_MS);
+    if (pin?.chatHistory) {
+      console.log('[AI CHAT DEBUG] Chat history content:', JSON.stringify(pin.chatHistory.map(m => ({sender: m.sender, text: m.text.substring(0, 30)}))));
+    }
   }
   
   const loadingMsg = options.loadingMsg || addMessage('bot', '…');
   
-  const messages = pin && pin.chatHistory
-    ? pin.chatHistory.slice(-10).map(msg => ({
-        role: msg.sender === 'bot' ? 'assistant' : msg.sender,
-        content: msg.text
-      }))
-    : [];
+  const FALLBACK_STRINGS = [
+    '我在听，你可以慢慢说。准备好了，就告诉我。',
+    '我还在这里陪你。你可以慢慢看看，这件事现在有没有轻一点。',
+    '忧忧想得有点久了，这次没有说完。你可以再发一次，我会继续陪你看这件事。',
+    '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。'
+  ];
+  
+  const rawMessages = pin && pin.chatHistory ? pin.chatHistory.slice(-10) : [];
+  const filteredMessages = rawMessages.filter(msg => 
+    msg.text !== '…' && !FALLBACK_STRINGS.includes(msg.text)
+  );
+  
+  if (DEV_MODE) {
+    console.log('[AI CHAT DEBUG] Filtered messages - before:', rawMessages.length, 'after:', filteredMessages.length);
+  }
+  
+  const messages = filteredMessages.map(msg => ({
+    role: msg.sender === 'bot' ? 'assistant' : msg.sender,
+    content: msg.text
+  }));
 
   if (messages.length === 0) {
     messages.push({ role: 'user', content: userText });
   }
+  
+  const currentUser = getCurrentUser();
+  const reviewStage = currentUser?.reviewStage;
   
   const pinInfo = pin ? {
     coreIssue: pin.coreIssue,
     reflectionDays: pin.reflectionDays,
     warmExplanation: pin.warmExplanation,
     currentGuides: pin.currentGuides,
-    createdAt: pin.createdAt
+    aiResult: pin.aiResult,
+    reviewHistory: pin.reviewHistory,
+    reviewCount: pin.reviewCount,
+    createdAt: pin.createdAt,
+    reviewStage: reviewStage,
+    pendingReviewChoice: currentUser?.pendingReviewChoice
   } : null;
   
   const requestBody = {
@@ -670,19 +770,33 @@ async function callAIChat(userText, options = {}) {
   };
   
   if (DEV_MODE) {
-    console.log('[AI CHAT DEBUG] Request body:', JSON.stringify(requestBody).substring(0, 500));
+    console.log('[AI CHAT DEBUG] =========================');
+    console.log('[AI CHAT DEBUG] Full request body:', JSON.stringify(requestBody));
+    console.log('[AI CHAT DEBUG] reviewStage sent:', reviewStage);
+    console.log('[AI CHAT DEBUG] Latest message:', messages.length > 0 ? messages[messages.length - 1].content.substring(0, 50) : 'none');
+    console.log('[AI CHAT DEBUG] Message count:', messages.length);
+    console.log('[AI CHAT DEBUG] Messages array:', JSON.stringify(messages.map(m => ({role: m.role, content: m.content.substring(0, 30)}))));
+    console.log('[AI CHAT DEBUG] Pin info:', JSON.stringify(pinInfo));
+    console.table(messages.map((m, i) => ({index: i, role: m.role, content: m.content.substring(0, 50)})));
   }
   
   try {
     if (DEV_MODE) console.log('[AI CHAT DEBUG] Fetching:', '/api/ai/chat');
+    console.log('[AI CHAT DEBUG] Request body length:', JSON.stringify(requestBody).length);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_CHAT_TIMEOUT_MS);
     
     const response = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     if (DEV_MODE) {
       console.log('[AI CHAT DEBUG] Response status:', response.status);
@@ -691,43 +805,90 @@ async function callAIChat(userText, options = {}) {
     
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText.substring(0, 200)}`);
+      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText.substring(0, 300)}`);
     }
     
-    const aiResponse = await response.json();
+    const responseText = await response.text();
+    if (DEV_MODE) {
+      console.log('[AI CHAT DEBUG] Response text:', responseText.substring(0, 1000));
+    }
+    
+    let aiResponse;
+    try {
+      aiResponse = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new Error(`JSON parse error: ${parseError.message}`);
+    }
     
     if (DEV_MODE) {
-      console.log('[AI CHAT DEBUG] AI response received:', aiResponse);
+      console.log('[AI CHAT DEBUG] AI response parsed:', aiResponse);
       console.log('[AI CHAT DEBUG] Reply:', aiResponse.reply);
+      console.log('[AI CHAT DEBUG] Has review:', !!aiResponse.review);
+      console.log('[AI CHAT DEBUG] Review nextReflectionDays:', aiResponse.review?.nextReflectionDays);
     }
     
     if (!aiResponse || typeof aiResponse.reply !== 'string' || !aiResponse.reply.trim()) {
       throw new Error('Invalid AI chat response shape');
+    }
+    
+    if (aiResponse.debugFallback) {
+      if (DEV_MODE) {
+        console.warn('[AI CHAT DEBUG] =========================');
+        console.warn('[AI CHAT DEBUG] Backend returned fallback response');
+        console.warn('[AI CHAT DEBUG] fallback source:', 'backend_debugFallback');
+        console.warn('[AI CHAT DEBUG] fallbackReason:', aiResponse.fallbackReason);
+        console.warn('[AI CHAT DEBUG] Mode:', mode);
+        console.warn('[AI CHAT DEBUG] reviewStage:', reviewStage);
+        console.warn('[AI CHAT DEBUG] Elapsed ms:', Date.now() - startTime);
+        console.warn('[AI CHAT DEBUG] fallback persisted:', false);
+      }
+      
+      const fallbackReply = '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。';
+      addMessage('bot', fallbackReply);
+      return false;
     }
 
     processChatAIResponse({
       reply: aiResponse.reply,
       readyToPin: !!aiResponse.readyToPin,
       readyToRemove: !!aiResponse.readyToRemove,
-      analysis: aiResponse.analysis
+      analysis: aiResponse.analysis,
+      review: aiResponse.review
     });
     return true;
     
   } catch (error) {
+    const elapsedMs = Date.now() - startTime;
+    
     if (DEV_MODE) {
       console.warn('[AI CHAT DEBUG] =========================');
       console.warn('[AI CHAT DEBUG] API call FAILED!');
       console.warn('[AI CHAT DEBUG] Error:', error.message);
       console.warn('[AI CHAT DEBUG] Error name:', error.name);
       console.warn('[AI CHAT DEBUG] Error stack:', error.stack);
-      console.warn('[AI CHAT DEBUG] Falling back to local reply');
+      console.warn('[AI CHAT DEBUG] Mode:', mode);
+      console.warn('[AI CHAT DEBUG] reviewStage:', reviewStage);
+      console.warn('[AI CHAT DEBUG] fallback displayed: true');
+      console.warn('[AI CHAT DEBUG] fallback persisted: false');
+      console.warn('[AI CHAT DEBUG] fallback reason:', error.message);
+      console.warn('[AI CHAT DEBUG] Error type:', typeof error);
+      console.warn('[AI CHAT DEBUG] Elapsed ms:', elapsedMs);
+      if (error.name === 'AbortError') {
+        console.warn('[AI CHAT DEBUG] Request was aborted/timeout');
+      }
+      if (error.name === 'TypeError') {
+        console.warn('[AI CHAT DEBUG] Network error or request issue');
+      }
     }
 
-    const fallbackReply = mode === 'pinning' 
-      ? '我在听，你可以慢慢说。准备好了，就告诉我。'
-      : '我还在这里陪你。你可以慢慢看看，这件事现在有没有轻一点。';
+    const fallbackReply = '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。';
     addMessage('bot', fallbackReply);
-    saveMessage('bot', fallbackReply);
+    
+    if (DEV_MODE) {
+      console.warn('[AI CHAT DEBUG] fallback source:', 'frontend_fetch_error');
+      console.warn('[AI CHAT DEBUG] fallback persisted:', false);
+    }
+    
     return false;
   } finally {
     if (loadingMsg && loadingMsg.parentNode) {
@@ -807,6 +968,7 @@ function processChatAIResponse(aiResponse) {
     
     if (currentUser) {
       currentUser.pendingAction = 'remove';
+      currentUser.pendingReviewAction = null;
       UserStorage.updateUser(currentUser);
       UserStorage.setCurrentUser(currentUser.username);
     }
@@ -815,11 +977,42 @@ function processChatAIResponse(aiResponse) {
       addActionButton('轻轻取下这根针', () => {
         if (currentUser) {
           currentUser.pendingAction = null;
+          currentUser.pendingReviewAction = null;
           UserStorage.updateUser(currentUser);
           UserStorage.setCurrentUser(currentUser.username);
         }
         removeReviewedNeedleWithAnimation();
       });
+    }, 300);
+  }
+  
+  if (mode === 'review' && !aiResponse.readyToRemove && aiResponse.review && aiResponse.review.nextReflectionDays) {
+    const reviewStage = currentUser?.reviewStage;
+    
+    if (DEV_MODE) {
+      console.log('[AI RESPONSE DEBUG] =========================');
+      console.log('[AI RESPONSE DEBUG] readyToRemove false, showing review choice buttons');
+      console.log('[AI RESPONSE DEBUG] nextReflectionDays:', aiResponse.review.nextReflectionDays);
+      console.log('[AI RESPONSE DEBUG] reasonCategory:', aiResponse.review.reasonCategory);
+      console.log('[AI RESPONSE DEBUG] stillAffectsUser:', aiResponse.review.stillAffectsUser);
+      console.log('[AI RESPONSE DEBUG] reviewStage:', reviewStage);
+    }
+    
+    if (currentUser) {
+      currentUser.reviewStage = 'review_conversation';
+      currentUser.pendingAction = 'review_reschedule';
+      currentUser.pendingReviewAction = {
+        pinId: window.reviewingPinId || currentUser.reviewingPinId,
+        nextReflectionDays: aiResponse.review.nextReflectionDays,
+        reasonCategory: aiResponse.review.reasonCategory,
+        stillAffectsUser: aiResponse.review.stillAffectsUser
+      };
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+    }
+    
+    setTimeout(() => {
+      addReviewChoiceButtons(aiResponse.review.nextReflectionDays, aiResponse.review);
     }, 300);
   }
 }
@@ -973,12 +1166,13 @@ function showPostRemovalScreen(currentUser) {
   const remainingCompleted = currentUser.painPins.filter(p => p.completed || p.hasNeedle);
   
   if (remainingCompleted.length > 0) {
-    const fastForwardDays = NEEDLE_REVIEW_DAYS;
+    const nextPin = remainingCompleted[0];
+    const fastForwardDays = nextPin?.reflectionDays || DEMO_FAST_FORWARD_DAYS;
     
     const demoMessage = document.createElement('div');
     demoMessage.className = 'summary-line';
-    demoMessage.textContent = '为了演示，我们可以继续快进时间，看看下一根针是否也可以放下。';
-    demoMessage.style.fontSize = '16px';
+    demoMessage.textContent = `为了演示回顾功能，快进到 ${fastForwardDays} 天后，看看你是否已经准备好放下这针烦恼。`;
+    demoMessage.style.fontSize = '18px';
     demoMessage.style.opacity = '0.9';
     
     const fastForwardBtn = document.createElement('button');
@@ -986,17 +1180,35 @@ function showPostRemovalScreen(currentUser) {
     fastForwardBtn.textContent = `快进 ${fastForwardDays} 天`;
     
     fastForwardBtn.addEventListener('click', () => {
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] =========================');
+        console.log('[FAST FORWARD DEBUG] button clicked (post-removal)');
+        console.log('[FAST FORWARD DEBUG] selected pin id:', nextPin?.id);
+        console.log('[FAST FORWARD DEBUG] selected reflectionDays:', fastForwardDays);
+      }
+      
       fastForwardCompanionDays(fastForwardDays);
       
-      demoMessage.textContent = '几天过去了，点击忧忧身上的针，看看这份烦恼是否可以放下了。';
-      fastForwardBtn.remove();
+      window.STABIT_MODE = 'reviewNeedle';
+      window.STABIT_CHAT_MODE = null;
       
       const existingBadge = chatScreen.querySelector('.day-badge');
       if (existingBadge) {
         existingBadge.textContent = getCompanionDays();
       }
       
-      window.STABIT_MODE = 'reviewNeedle';
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] opening review panel directly');
+      }
+      
+      setTimeout(() => {
+        if (window.showReviewPanel) {
+          window.showReviewPanel();
+          if (DEV_MODE) console.log('[FAST FORWARD DEBUG] showReviewPanel called: true');
+        } else {
+          if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: showReviewPanel is not available');
+        }
+      }, 100);
     });
     
     const demoContainer = document.createElement('div');
@@ -1088,6 +1300,128 @@ function addActionButton(label, onClick) {
   return buttonEl;
 }
 window.addActionButton = addActionButton;
+
+function addReviewChoiceButtons(nextReflectionDays, reviewData) {
+  const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
+  existingButtons.forEach(btn => btn.remove());
+  
+  if (DEV_MODE) {
+    console.log('[CHAT DEBUG] addReviewChoiceButtons() - nextReflectionDays:', nextReflectionDays);
+    console.log('[CHAT DEBUG] addReviewChoiceButtons() - reviewData:', reviewData);
+  }
+  
+  const wrapper = document.createElement('div');
+  wrapper.className = 'chat-review-choice-wrapper';
+  
+  const continueBtn = document.createElement('button');
+  continueBtn.className = 'chat-review-choice-button';
+  continueBtn.textContent = '继续聊聊';
+  continueBtn.addEventListener('click', () => {
+    if (DEV_MODE) console.log('[CHAT DEBUG] "继续聊聊" clicked');
+    const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
+    existingButtons.forEach(btn => btn.remove());
+    
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      currentUser.pendingAction = null;
+      currentUser.pendingReviewAction = null;
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+    }
+  });
+  
+  const rescheduleBtn = document.createElement('button');
+  rescheduleBtn.className = 'chat-review-choice-button';
+  rescheduleBtn.textContent = `${nextReflectionDays}天后再看看`;
+  rescheduleBtn.addEventListener('click', () => {
+    rescheduleReview(nextReflectionDays, reviewData);
+  });
+  
+  wrapper.appendChild(continueBtn);
+  wrapper.appendChild(rescheduleBtn);
+  
+  chatLog.appendChild(wrapper);
+  scrollToBottom();
+}
+window.addReviewChoiceButtons = addReviewChoiceButtons;
+
+function rescheduleReview(nextReflectionDays, reviewData) {
+  if (DEV_MODE) {
+    console.log('[CHAT DEBUG] =========================');
+    console.log('[CHAT DEBUG] rescheduleReview() called');
+    console.log('[CHAT DEBUG] nextReflectionDays:', nextReflectionDays);
+    console.log('[CHAT DEBUG] reviewData:', reviewData);
+  }
+  
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+  
+  const pinId = window.reviewingPinId || currentUser.reviewingPinId;
+  if (!pinId) {
+    if (DEV_MODE) console.log('[CHAT DEBUG] No pinId found for reschedule');
+    return;
+  }
+  
+  const pin = currentUser.painPins.find(p => p.id === pinId);
+  if (!pin) {
+    if (DEV_MODE) console.log('[CHAT DEBUG] Pin not found:', pinId);
+    return;
+  }
+  
+  const currentDay = getCurrentCompanionDay();
+  const newReviewDay = currentDay + nextReflectionDays;
+  
+  if (DEV_MODE) {
+    console.log('[CHAT DEBUG] pin id:', pinId);
+    console.log('[CHAT DEBUG] currentDay:', currentDay);
+    console.log('[CHAT DEBUG] new reviewDay:', newReviewDay);
+  }
+  
+  pin.lastReviewedAt = Date.now();
+  pin.lastReviewedDay = currentDay;
+  pin.reviewCount = (pin.reviewCount || 0) + 1;
+  pin.reflectionDays = nextReflectionDays;
+  pin.reviewDay = newReviewDay;
+  pin.latestReview = reviewData;
+  
+  pin.reviewHistory = pin.reviewHistory || [];
+  pin.reviewHistory.push({
+    reviewedAt: Date.now(),
+    reviewedDay: currentDay,
+    nextReflectionDays: nextReflectionDays,
+    reasonCategory: reviewData.reasonCategory,
+    stillAffectsUser: reviewData.stillAffectsUser,
+    aiReply: reviewData.aiReply || ''
+  });
+  
+  if (DEV_MODE) {
+    console.log('[CHAT DEBUG] reviewCount:', pin.reviewCount);
+    console.log('[CHAT DEBUG] reviewHistory length:', pin.reviewHistory.length);
+  }
+  
+  if (currentUser.activePinId === pinId) {
+    const stillExists = currentUser.painPins.some(p => p.id === pinId);
+    if (!stillExists) {
+      currentUser.activePinId = null;
+    }
+  }
+  
+  currentUser.reviewingPinId = null;
+  currentUser.pendingAction = null;
+  currentUser.pendingReviewAction = null;
+  window.reviewingPinId = null;
+  window.STABIT_CHAT_MODE = null;
+  
+  if (DEV_MODE) {
+    console.log('[CHAT DEBUG] reviewingPinId cleared:', currentUser.reviewingPinId);
+    console.log('[CHAT DEBUG] pendingAction cleared:', currentUser.pendingAction);
+  }
+  
+  UserStorage.updateUser(currentUser);
+  UserStorage.setCurrentUser(currentUser.username);
+  
+  showHomeScreen();
+}
 
 function scrollToBottom() {
   chatLog.scrollTop = chatLog.scrollHeight;
@@ -1361,28 +1695,78 @@ function showSummaryPanel() {
     secondaryEl.remove();
     buttonsContainer.remove();
     
+    const chatPin = getCurrentChatPin();
+    const reviewDays = chatPin?.reflectionDays || DEMO_FAST_FORWARD_DAYS;
+    
     const demoMessage = document.createElement('div');
     demoMessage.className = 'summary-line';
-    demoMessage.textContent = '为了演示，我们可以先快进几天看看忧忧的变化。';
-    demoMessage.style.fontSize = '16px';
+    demoMessage.textContent = `为了演示回顾功能，快进到 ${reviewDays} 天后，看看你是否已经准备好放下这针烦恼。`;
+    demoMessage.style.fontSize = '18px';
     demoMessage.style.opacity = '0.9';
+    demoMessage.style.marginTop = '10px';
     
     const fastForwardBtn = document.createElement('button');
     fastForwardBtn.className = 'summary-btn';
-    fastForwardBtn.textContent = `快进 ${DEMO_FAST_FORWARD_DAYS} 天`;
+    fastForwardBtn.textContent = `快进 ${reviewDays} 天`;
+    fastForwardBtn.style.marginTop = '5px';
     
     fastForwardBtn.addEventListener('click', () => {
-      fastForwardCompanionDays(DEMO_FAST_FORWARD_DAYS);
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] =========================');
+        console.log('[FAST FORWARD DEBUG] button clicked');
+        console.log('[FAST FORWARD DEBUG] selected pin id:', chatPin?.id);
+        console.log('[FAST FORWARD DEBUG] selected reflectionDays:', reviewDays);
+      }
       
-      demoMessage.textContent = '几天过去了，点击忧忧身上的针，看看这份烦恼是否可以放下了。';
-      fastForwardBtn.remove();
+      if (!chatPin) {
+        if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: No chat pin found');
+        return;
+      }
+      
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: No current user');
+        return;
+      }
+      
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] companionDayOffset before:', currentUser.companionDayOffset || 0);
+        console.log('[FAST FORWARD DEBUG] STABIT_MODE before:', window.STABIT_MODE);
+      }
+      
+      fastForwardCompanionDays(reviewDays);
+      
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] companionDayOffset after:', currentUser.companionDayOffset || 0);
+      }
+      
+      window.STABIT_MODE = 'reviewNeedle';
+      window.STABIT_CHAT_MODE = null;
+      
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] STABIT_MODE after:', window.STABIT_MODE);
+        console.log('[FAST FORWARD DEBUG] STABIT_CHAT_MODE after:', window.STABIT_CHAT_MODE);
+      }
       
       const existingBadge = chatScreen.querySelector('.day-badge');
       if (existingBadge) {
         existingBadge.textContent = getCompanionDays();
       }
       
-      window.STABIT_MODE = 'reviewNeedle';
+      if (DEV_MODE) {
+        console.log('[FAST FORWARD DEBUG] opening review panel directly');
+        console.log('[FAST FORWARD DEBUG] selected pin id:', chatPin.id);
+        console.log('[FAST FORWARD DEBUG] selected reflectionDays:', reviewDays);
+      }
+      
+      setTimeout(() => {
+        if (window.showReviewPanel) {
+          window.showReviewPanel();
+          if (DEV_MODE) console.log('[FAST FORWARD DEBUG] showReviewPanel called: true');
+        } else {
+          if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: showReviewPanel is not available');
+        }
+      }, 100);
     });
     
     const demoContainer = document.createElement('div');
@@ -1390,6 +1774,7 @@ function showSummaryPanel() {
     demoContainer.style.flexDirection = 'column';
     demoContainer.style.alignItems = 'center';
     demoContainer.style.gap = '20px';
+    demoContainer.style.marginTop = '10px';
     
     demoContainer.appendChild(demoMessage);
     demoContainer.appendChild(fastForwardBtn);
