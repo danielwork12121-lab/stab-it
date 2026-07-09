@@ -27,7 +27,8 @@ const ASSETS = {
   painDot: '/assets/chat/pain-dot.png',
   pinStuck: '/assets/pin/pin-stuck.png',
   backgroundMusic: '/assets/audio/background-music.wav',
-  pinImpactSound: '/assets/audio/pin-impact.qta'
+  pinImpactSound: '/assets/audio/pin-impact.qta',
+  celebrationSound: '/assets/audio/celebration.m4a'
 };
 
 const HOME_DAY_BADGE_POSITION = {

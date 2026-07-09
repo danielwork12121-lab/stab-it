@@ -268,31 +268,45 @@ function enterReviewChat(pinId, contextMessage) {
 
 function directRemoveNeedle(pinId) {
   if (DEV_MODE) {
-    console.log('[REVIEW DEBUG] =========================');
-    console.log('[REVIEW DEBUG] directRemoveNeedle called - pinId:', pinId);
+    console.log('[REVIEW LOOP DEBUG] =========================');
+    console.log('[REVIEW LOOP DEBUG] direct remove clicked');
+    console.log('[REVIEW LOOP DEBUG] button pinId:', pinId);
   }
-  
+
   const currentUser = getCurrentUser();
   if (!currentUser || !currentUser.painPins) {
-    if (DEV_MODE) console.log('[REVIEW DEBUG] No user or painPins found');
+    if (DEV_MODE) console.error('[REVIEW LOOP DEBUG] direct remove - no currentUser or painPins');
     return;
   }
-  
+
   currentUser.resolvedPins = currentUser.resolvedPins || [];
-  
+
+  const painPinsCountBefore = currentUser.painPins.length;
+  const resolvedPinsCountBefore = currentUser.resolvedPins.length;
+
+  if (DEV_MODE) {
+    console.log('[REVIEW LOOP DEBUG] activePinId:', currentUser.activePinId);
+    console.log('[REVIEW LOOP DEBUG] reviewingPinId:', currentUser.reviewingPinId);
+    console.log('[REVIEW LOOP DEBUG] painPins count before:', painPinsCountBefore);
+    console.log('[REVIEW LOOP DEBUG] resolvedPins count before:', resolvedPinsCountBefore);
+  }
+
   const pinIndex = currentUser.painPins.findIndex(p => p.id === pinId);
   if (pinIndex === -1) {
-    if (DEV_MODE) console.log('[REVIEW DEBUG] Pin not found:', pinId);
+    if (DEV_MODE) {
+      console.error('[REVIEW LOOP DEBUG] direct remove - pin not found:', pinId);
+      console.error('[REVIEW LOOP DEBUG] direct remove - not mutating any other pin');
+    }
     return;
   }
-  
+
   const pinToRemove = currentUser.painPins[pinIndex];
-  
-  if (DEV_MODE) console.log('[REVIEW DEBUG] Direct remove - pin:', pinToRemove.id);
-  
+
+  if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] reviewed pin id:', pinToRemove.id);
+
   const chatPanel = chatScreen.querySelector('.chat-panel');
   const pinElement = chatScreen.querySelector(`.pin-stuck[data-pin-id="${pinToRemove.id}"]`);
-  
+
   if (chatPanel) {
     chatPanel.classList.add('review-chat-fade-out');
   }
@@ -346,6 +360,8 @@ function directRemoveNeedle(pinId) {
       console.log('[REVIEW DEBUG] reviewingPinId cleared:', user.reviewingPinId);
       console.log('[REVIEW DEBUG] resolvedPins count:', user.resolvedPins.length);
       console.log('[REVIEW DEBUG] remaining painPins count:', user.painPins.length);
+      console.log('[REVIEW LOOP DEBUG] painPins count after:', user.painPins.length);
+      console.log('[REVIEW LOOP DEBUG] resolvedPins count after:', user.resolvedPins.length);
     }
   };
   
@@ -379,6 +395,7 @@ function directRemoveNeedle(pinId) {
         
         showReleaseCelebrationButton(() => {
           showHomeScreen();
+          if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
           setTimeout(() => {
             if (window.showReleaseConfettiOverlay) {
               window.showReleaseConfettiOverlay();
@@ -396,6 +413,7 @@ function directRemoveNeedle(pinId) {
       
       showReleaseCelebrationButton(() => {
         showHomeScreen();
+        if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
         setTimeout(() => {
           if (window.showReleaseConfettiOverlay) {
             window.showReleaseConfettiOverlay();

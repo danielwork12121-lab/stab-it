@@ -617,6 +617,10 @@ function showReleaseConfettiOverlay() {
   confetti.className = 'release-confetti-overlay';
   confetti.src = '/assets/effects/release-confetti.png';
   homeScreen.appendChild(confetti);
+
+  if (window.AudioManager && AudioManager.playCelebrationSound) {
+    AudioManager.playCelebrationSound();
+  }
   
   setTimeout(() => {
     if (confetti.parentNode) {
@@ -1263,28 +1267,40 @@ function removeReviewedNeedleWithAnimation() {
 
   currentUser.resolvedPins = currentUser.resolvedPins || [];
 
+  const painPinsCountBefore = currentUser.painPins.length;
+  const resolvedPinsCountBefore = currentUser.resolvedPins.length;
+
   let pinToRemove = null;
   let pinIndex = -1;
 
-  if (window.reviewingPinId) {
-    pinIndex = currentUser.painPins.findIndex(p => p.id === window.reviewingPinId);
+  if (window.reviewingPinId || currentUser.reviewingPinId) {
+    const reviewingId = window.reviewingPinId || currentUser.reviewingPinId;
+    pinIndex = currentUser.painPins.findIndex(p => p.id === reviewingId);
     if (pinIndex !== -1) {
       pinToRemove = currentUser.painPins[pinIndex];
+    } else {
+      if (DEV_MODE) {
+        console.error('[REVIEW LOOP DEBUG] chat remove - reviewingPinId not found in painPins:', reviewingId);
+      }
     }
   }
 
   if (!pinToRemove) {
-    const oldestCompletedIndex = currentUser.painPins.findIndex(p => p.completed || p.hasNeedle);
-    if (oldestCompletedIndex !== -1) {
-      pinIndex = oldestCompletedIndex;
-      pinToRemove = currentUser.painPins[oldestCompletedIndex];
+    if (DEV_MODE) {
+      console.error('[REVIEW LOOP DEBUG] chat remove - no reviewingPinId set, aborting to avoid wrong pin removal');
     }
-  }
-
-  if (!pinToRemove) {
-    if (DEV_MODE) console.log('[PIN DEBUG] No completed needle found to remove');
-    addMessage('bot', '没有找到可以放下的针。');
+    addMessage('bot', '没有找到正在回顾的针。');
     return;
+  }
+
+  if (DEV_MODE) {
+    console.log('[REVIEW LOOP DEBUG] =========================');
+    console.log('[REVIEW LOOP DEBUG] chat remove clicked');
+    console.log('[REVIEW LOOP DEBUG] reviewed pin id:', pinToRemove.id);
+    console.log('[REVIEW LOOP DEBUG] activePinId:', currentUser.activePinId);
+    console.log('[REVIEW LOOP DEBUG] reviewingPinId:', currentUser.reviewingPinId);
+    console.log('[REVIEW LOOP DEBUG] painPins count before:', painPinsCountBefore);
+    console.log('[REVIEW LOOP DEBUG] resolvedPins count before:', resolvedPinsCountBefore);
   }
 
   const chatPanel = chatScreen.querySelector('.chat-panel');
@@ -1347,6 +1363,8 @@ function removeReviewedNeedleWithAnimation() {
       console.log('[PIN DEBUG] remaining painPins count:', user.painPins.length);
       console.log('[PIN DEBUG] remaining painPins ids:', user.painPins.map(p => p.id));
       console.log('[PIN DEBUG] resolvedPins ids:', user.resolvedPins.map(p => p.id));
+      console.log('[REVIEW LOOP DEBUG] painPins count after:', user.painPins.length);
+      console.log('[REVIEW LOOP DEBUG] resolvedPins count after:', user.resolvedPins.length);
     }
   };
 
@@ -1386,10 +1404,16 @@ function removeReviewedNeedleWithAnimation() {
         }
 
         showReleaseCelebrationButton(() => {
-          const latestUser = getCurrentUser();
-          if (latestUser) {
-            showPostRemovalScreen(latestUser);
-          }
+          showHomeScreen();
+          if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
+          setTimeout(() => {
+            if (window.showReleaseConfettiOverlay) {
+              window.showReleaseConfettiOverlay();
+            }
+            if (window.showReleaseCelebrationText) {
+              window.showReleaseCelebrationText();
+            }
+          }, 300);
         });
       }, 1250);
     } else {
@@ -1410,10 +1434,16 @@ function removeReviewedNeedleWithAnimation() {
       }
 
       showReleaseCelebrationButton(() => {
-        const latestUser = getCurrentUser();
-        if (latestUser) {
-          showPostRemovalScreen(latestUser);
-        }
+        showHomeScreen();
+        if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
+        setTimeout(() => {
+          if (window.showReleaseConfettiOverlay) {
+            window.showReleaseConfettiOverlay();
+          }
+          if (window.showReleaseCelebrationText) {
+            window.showReleaseCelebrationText();
+          }
+        }, 300);
       });
     }
   }, 450);
@@ -1606,88 +1636,97 @@ window.addReviewChoiceButtons = addReviewChoiceButtons;
 
 function rescheduleReview(nextReflectionDays, reviewData) {
   if (DEV_MODE) {
-    console.log('[CHAT DEBUG] =========================');
-    console.log('[CHAT DEBUG] rescheduleReview() called');
-    console.log('[CHAT DEBUG] nextReflectionDays:', nextReflectionDays);
-    console.log('[CHAT DEBUG] reviewData:', reviewData);
+    console.log('[REVIEW LOOP DEBUG] =========================');
+    console.log('[REVIEW LOOP DEBUG] reschedule clicked');
   }
-  
+
   const currentUser = getCurrentUser();
-  if (!currentUser) return;
-  
+  if (!currentUser) {
+    if (DEV_MODE) console.error('[REVIEW LOOP DEBUG] reschedule - no currentUser');
+    return;
+  }
+
   const pinId = window.reviewingPinId || currentUser.reviewingPinId;
   if (!pinId) {
-    if (DEV_MODE) console.log('[CHAT DEBUG] No pinId found for reschedule');
+    if (DEV_MODE) console.error('[REVIEW LOOP DEBUG] reschedule - no reviewingPinId, aborting');
     return;
   }
-  
+
   const pin = currentUser.painPins.find(p => p.id === pinId);
   if (!pin) {
-    if (DEV_MODE) console.log('[CHAT DEBUG] Pin not found:', pinId);
+    if (DEV_MODE) {
+      console.error('[REVIEW LOOP DEBUG] reschedule - pin not found in painPins:', pinId);
+      console.error('[REVIEW LOOP DEBUG] reschedule - not mutating any other pin');
+    }
     return;
   }
-  
+
+  const validDays = (typeof nextReflectionDays === 'number' && nextReflectionDays > 0) ? nextReflectionDays : 5;
+
   const currentDay = getCurrentCompanionDay();
-  const newReviewDay = currentDay + nextReflectionDays;
-  
+  const newReviewDay = currentDay + validDays;
+
+  const painPinsCountBefore = currentUser.painPins.length;
+  const resolvedPinsCountBefore = (currentUser.resolvedPins || []).length;
+  const oldReviewDay = pin.reviewDay;
+  const oldReviewCount = pin.reviewCount || 0;
+
   if (DEV_MODE) {
-    console.log('[CHAT DEBUG] pin id:', pinId);
-    console.log('[CHAT DEBUG] currentDay:', currentDay);
-    console.log('[CHAT DEBUG] new reviewDay:', newReviewDay);
+    console.log('[REVIEW LOOP DEBUG] reviewed pin id:', pinId);
+    console.log('[REVIEW LOOP DEBUG] activePinId:', currentUser.activePinId);
+    console.log('[REVIEW LOOP DEBUG] reviewingPinId:', currentUser.reviewingPinId);
+    console.log('[REVIEW LOOP DEBUG] requested days:', nextReflectionDays, '-> valid days:', validDays);
+    console.log('[REVIEW LOOP DEBUG] painPins count before:', painPinsCountBefore);
+    console.log('[REVIEW LOOP DEBUG] resolvedPins count before:', resolvedPinsCountBefore);
+    console.log('[REVIEW LOOP DEBUG] reviewDay before:', oldReviewDay);
+    console.log('[REVIEW LOOP DEBUG] reviewCount before:', oldReviewCount);
   }
-  
+
   pin.lastReviewedAt = Date.now();
   pin.lastReviewedDay = currentDay;
-  pin.reviewCount = (pin.reviewCount || 0) + 1;
-  pin.reflectionDays = nextReflectionDays;
+  pin.reviewCount = oldReviewCount + 1;
+  pin.reflectionDays = validDays;
   pin.reviewDay = newReviewDay;
   pin.latestReview = reviewData;
-  
+
   pin.reviewHistory = pin.reviewHistory || [];
   pin.reviewHistory.push({
     reviewedAt: Date.now(),
     reviewedDay: currentDay,
-    nextReflectionDays: nextReflectionDays,
+    nextReflectionDays: validDays,
     reasonCategory: reviewData.reasonCategory,
     stillAffectsUser: reviewData.stillAffectsUser,
     aiReply: reviewData.aiReply || ''
   });
-  
-  if (DEV_MODE) {
-    console.log('[CHAT DEBUG] reviewCount:', pin.reviewCount);
-    console.log('[CHAT DEBUG] reviewHistory length:', pin.reviewHistory.length);
-  }
-  
+
   if (currentUser.activePinId === pinId) {
     const stillExists = currentUser.painPins.some(p => p.id === pinId);
     if (!stillExists) {
       currentUser.activePinId = null;
     }
   }
-  
+
   currentUser.reviewingPinId = null;
   currentUser.pendingAction = null;
   currentUser.pendingReviewAction = null;
+  currentUser.reviewStage = null;
   window.reviewingPinId = null;
   window.STABIT_CHAT_MODE = null;
-  
-  if (DEV_MODE) {
-    console.log('[CHAT DEBUG] reviewingPinId cleared:', currentUser.reviewingPinId);
-    console.log('[CHAT DEBUG] pendingAction cleared:', currentUser.pendingAction);
-  }
-  
+
   UserStorage.updateUser(currentUser);
   UserStorage.setCurrentUser(currentUser.username);
-  
+
+  if (DEV_MODE) {
+    console.log('[REVIEW LOOP DEBUG] reviewDay after:', pin.reviewDay);
+    console.log('[REVIEW LOOP DEBUG] reviewCount after:', pin.reviewCount);
+    console.log('[REVIEW LOOP DEBUG] painPins count after:', currentUser.painPins.length);
+    console.log('[REVIEW LOOP DEBUG] resolvedPins count after:', (currentUser.resolvedPins || []).length);
+  }
+
   showHomeScreen();
-  setTimeout(() => {
-    if (window.showReleaseConfettiOverlay) {
-      window.showReleaseConfettiOverlay();
-    }
-    if (window.showReleaseCelebrationText) {
-      window.showReleaseCelebrationText();
-    }
-  }, 300);
+  if (DEV_MODE) {
+    console.log('[REVIEW LOOP DEBUG] returned home true');
+  }
 }
 
 function scrollToBottom() {
