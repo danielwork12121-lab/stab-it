@@ -458,7 +458,7 @@ function injectChatStyles() {
       border-radius: 32px;
       box-shadow: 0 6px 20px rgba(157, 78, 221, 0.5), 0 0 30px rgba(157, 78, 221, 0.3);
       cursor: pointer;
-      z-index: 80;
+      z-index: 90;
       opacity: 0;
       animation: celebrationBtnFadeIn 400ms ease-out 300ms forwards;
     }
@@ -480,6 +480,94 @@ function injectChatStyles() {
       100% {
         opacity: 1;
         transform: translateY(0);
+      }
+    }
+    
+    .release-confetti-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 200;
+      pointer-events: none;
+      opacity: 0;
+      animation: releaseConfettiFall 2800ms ease-in-out forwards;
+    }
+    
+    @keyframes releaseConfettiFall {
+      0% {
+        opacity: 0;
+        transform: translateY(-4%) translateX(0) scale(1.03);
+      }
+      15% {
+        opacity: 1;
+        transform: translateY(-1%) translateX(-1px) scale(1.03);
+      }
+      45% {
+        opacity: 1;
+        transform: translateY(2%) translateX(1px) scale(1.035);
+      }
+      75% {
+        opacity: 0.9;
+        transform: translateY(5%) translateX(-1px) scale(1.03);
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(9%) translateX(0) scale(1.03);
+      }
+    }
+    
+    .release-celebration-text {
+      position: absolute;
+      top: 8%;
+      left: 50%;
+      width: 86%;
+      transform: translateX(-50%) translateY(-8px);
+      z-index: 210;
+      pointer-events: none;
+      text-align: center;
+      color: #fff7ff;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      line-height: 1.45;
+      text-shadow:
+        0 0 10px rgba(210, 150, 255, 0.95),
+        0 0 24px rgba(150, 80, 255, 0.75),
+        0 3px 10px rgba(0, 0, 0, 0.45);
+      padding: 14px 18px;
+      border-radius: 22px;
+      background: linear-gradient(
+        135deg,
+        rgba(112, 66, 190, 0.28),
+        rgba(190, 104, 255, 0.18)
+      );
+      border: 1px solid rgba(255, 220, 255, 0.22);
+      backdrop-filter: blur(6px);
+      animation: releaseTextAppear 600ms ease-out forwards;
+    }
+    
+    .release-celebration-text .release-title {
+      display: block;
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+    
+    .release-celebration-text .release-subtitle {
+      display: block;
+      font-size: 15px;
+      font-weight: 500;
+      opacity: 0.95;
+    }
+    
+    @keyframes releaseTextAppear {
+      0% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-12px) scale(0.96);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
       }
     }
   `;
@@ -507,6 +595,42 @@ function showReleaseCelebrationButton(onContinue) {
     chatScreen.appendChild(btn);
   }
 }
+
+function showReleaseConfettiOverlay() {
+  const existingConfetti = homeScreen.querySelector('.release-confetti-overlay');
+  if (existingConfetti) {
+    existingConfetti.parentNode.removeChild(existingConfetti);
+  }
+  
+  const confetti = document.createElement('img');
+  confetti.className = 'release-confetti-overlay';
+  confetti.src = '/assets/effects/release-confetti.png';
+  homeScreen.appendChild(confetti);
+  
+  setTimeout(() => {
+    if (confetti.parentNode) {
+      confetti.parentNode.removeChild(confetti);
+    }
+  }, 3000);
+}
+window.showReleaseConfettiOverlay = showReleaseConfettiOverlay;
+
+function showReleaseCelebrationText() {
+  const existingText = homeScreen.querySelector('.release-celebration-text');
+  if (existingText) {
+    existingText.parentNode.removeChild(existingText);
+  }
+  
+  const textEl = document.createElement('div');
+  textEl.className = 'release-celebration-text';
+  textEl.innerHTML = `
+    <span class="release-title">✨恭喜你呀！放下了一针烦恼！✨</span>
+    <span class="release-subtitle">你看，这根针没有想象中那么难拔吧！以后有烦恼，记得来找忧忧哦！</span>
+  `;
+  
+  homeScreen.appendChild(textEl);
+}
+window.showReleaseCelebrationText = showReleaseCelebrationText;
 
 let chatPanel = null;
 let chatLog = null;
@@ -1543,6 +1667,14 @@ function rescheduleReview(nextReflectionDays, reviewData) {
   UserStorage.setCurrentUser(currentUser.username);
   
   showHomeScreen();
+  setTimeout(() => {
+    if (window.showReleaseConfettiOverlay) {
+      window.showReleaseConfettiOverlay();
+    }
+    if (window.showReleaseCelebrationText) {
+      window.showReleaseCelebrationText();
+    }
+  }, 300);
 }
 
 function scrollToBottom() {

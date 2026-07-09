@@ -381,6 +381,14 @@ function directRemoveNeedle(pinId) {
         
         showReleaseCelebrationButton(() => {
           showHomeScreen();
+          setTimeout(() => {
+            if (window.showReleaseConfettiOverlay) {
+              window.showReleaseConfettiOverlay();
+            }
+            if (window.showReleaseCelebrationText) {
+              window.showReleaseCelebrationText();
+            }
+          }, 300);
         });
       }, 1250);
     } else {
@@ -390,6 +398,14 @@ function directRemoveNeedle(pinId) {
       
       showReleaseCelebrationButton(() => {
         showHomeScreen();
+        setTimeout(() => {
+          if (window.showReleaseConfettiOverlay) {
+            window.showReleaseConfettiOverlay();
+          }
+          if (window.showReleaseCelebrationText) {
+            window.showReleaseCelebrationText();
+          }
+        }, 300);
       });
     }
   }, 500);
