@@ -380,30 +380,132 @@ function injectChatStyles() {
       pointer-events: none;
     }
     
+    .needle-release-ripple {
+      position: absolute;
+      width: 24%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 55;
+      transform: translate(-50%, -50%) scale(0.45);
+      background:
+        radial-gradient(circle,
+          rgba(225,185,255,0.95) 0%,
+          rgba(195,120,255,0.68) 30%,
+          rgba(165,90,255,0.35) 58%,
+          rgba(150,70,255,0.14) 78%,
+          transparent 100%);
+    }
+    
+    .needle-release-ripple.impact {
+      animation: needleReleaseRipple 700ms ease-out forwards;
+    }
+    
+    @keyframes needleReleaseRipple {
+      0% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(0.45);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(2.7);
+      }
+    }
+    
     .needle-fade-away {
       z-index: 60;
-      animation: needleFadeAway 1200ms ease forwards;
+      animation: needleFadeAway 1200ms ease-in-out forwards;
+      will-change: opacity, transform, filter;
     }
     
     @keyframes needleFadeAway {
       0% {
         opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
+        transform: translate(-50%, -50%) scale(1) rotate(0deg);
         filter: blur(0);
       }
-      60% {
-        opacity: 0.45;
-        transform: translate(-50%, -50%) scale(0.92);
-        filter: blur(2px);
+      35% {
+        opacity: 0.82;
+        transform: translate(-50%, -38%) scale(0.97) rotate(0.5deg);
+        filter: blur(0.8px);
+      }
+      70% {
+        opacity: 0.38;
+        transform: translate(-50%, -18%) scale(0.91) rotate(0deg);
+        filter: blur(2.5px);
       }
       100% {
         opacity: 0;
-        transform: translate(-50%, -50%) scale(0.75);
-        filter: blur(6px);
+        transform: translate(-50%, 4%) scale(0.84) rotate(0deg);
+        filter: blur(5px);
+      }
+    }
+    
+    .release-celebration-btn {
+      display: flex;
+      flex-direction: column;
+      width: 356px;
+      padding-top: 16px;
+      padding-bottom: 16px;
+      padding-left: 24px;
+      padding-right: 24px;
+      font-size: 16px;
+      font-weight: 600;
+      color: white;
+      background: linear-gradient(135deg, #9d4edd 0%, #7b2cbf 50%, #5a189a 100%);
+      border: none;
+      border-radius: 32px;
+      box-shadow: 0 6px 20px rgba(157, 78, 221, 0.5), 0 0 30px rgba(157, 78, 221, 0.3);
+      cursor: pointer;
+      z-index: 80;
+      opacity: 0;
+      animation: celebrationBtnFadeIn 400ms ease-out 300ms forwards;
+    }
+    
+    .release-celebration-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 8px 25px rgba(157, 78, 221, 0.6), 0 0 40px rgba(157, 78, 221, 0.4);
+    }
+    
+    .release-celebration-btn:active {
+      transform: scale(0.98);
+    }
+    
+    @keyframes celebrationBtnFadeIn {
+      0% {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
       }
     }
   `;
   document.head.appendChild(style);
+}
+
+function showReleaseCelebrationButton(onContinue) {
+  const btn = document.createElement('button');
+  btn.className = 'release-celebration-btn';
+  btn.textContent = '庆祝这针情绪退散了！';
+  
+  btn.addEventListener('click', () => {
+    if (btn.parentNode) {
+      btn.parentNode.removeChild(btn);
+    }
+    if (onContinue) {
+      onContinue();
+    }
+  });
+  
+  const buttonsContainer = chatScreen.querySelector('.summary-buttons');
+  if (buttonsContainer) {
+    buttonsContainer.appendChild(btn);
+  } else {
+    chatScreen.appendChild(btn);
+  }
 }
 
 let chatPanel = null;
@@ -1115,6 +1217,22 @@ function removeReviewedNeedleWithAnimation() {
 
   setTimeout(() => {
     if (pinElement) {
+      const ripple = document.createElement('div');
+      ripple.className = 'needle-release-ripple';
+      ripple.style.left = pinElement.style.left;
+      ripple.style.top = pinElement.style.top;
+      chatScreen.appendChild(ripple);
+      
+      setTimeout(() => {
+        ripple.classList.add('impact');
+      }, 50);
+      
+      setTimeout(() => {
+        if (ripple.parentNode) {
+          ripple.parentNode.removeChild(ripple);
+        }
+      }, 750);
+      
       pinElement.classList.add('needle-fade-away');
 
       setTimeout(() => {
@@ -1132,11 +1250,13 @@ function removeReviewedNeedleWithAnimation() {
           chatPanel.remove();
         }
 
-        const finalUser = getCurrentUser();
-        if (finalUser) {
-          showPostRemovalScreen(finalUser);
-        }
-      }, 1200);
+        showReleaseCelebrationButton(() => {
+          const latestUser = getCurrentUser();
+          if (latestUser) {
+            showPostRemovalScreen(latestUser);
+          }
+        });
+      }, 1250);
     } else {
       if (DEV_MODE) console.log('[PIN DEBUG] Matching DOM element not found, removing from storage only');
 
@@ -1154,10 +1274,12 @@ function removeReviewedNeedleWithAnimation() {
         chatPanel.remove();
       }
 
-      const finalUser = getCurrentUser();
-      if (finalUser) {
-        showPostRemovalScreen(finalUser);
-      }
+      showReleaseCelebrationButton(() => {
+        const latestUser = getCurrentUser();
+        if (latestUser) {
+          showPostRemovalScreen(latestUser);
+        }
+      });
     }
   }, 450);
 }

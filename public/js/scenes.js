@@ -353,6 +353,22 @@ function directRemoveNeedle(pinId) {
   
   setTimeout(() => {
     if (pinElement) {
+      const ripple = document.createElement('div');
+      ripple.className = 'needle-release-ripple';
+      ripple.style.left = pinElement.style.left;
+      ripple.style.top = pinElement.style.top;
+      chatScreen.appendChild(ripple);
+      
+      setTimeout(() => {
+        ripple.classList.add('impact');
+      }, 50);
+      
+      setTimeout(() => {
+        if (ripple.parentNode) {
+          ripple.parentNode.removeChild(ripple);
+        }
+      }, 750);
+      
       pinElement.classList.add('needle-fade-away');
       
       setTimeout(() => {
@@ -363,17 +379,18 @@ function directRemoveNeedle(pinId) {
         const freshUser = getCurrentUser();
         archiveAndRemovePin(freshUser);
         
-        setTimeout(() => {
+        showReleaseCelebrationButton(() => {
           showHomeScreen();
-        }, 500);
-      }, 1500);
+        });
+      }, 1250);
     } else {
       if (DEV_MODE) console.log('[REVIEW DEBUG] No DOM needle found, removing from storage only');
       const freshUser = getCurrentUser();
       archiveAndRemovePin(freshUser);
-      setTimeout(() => {
+      
+      showReleaseCelebrationButton(() => {
         showHomeScreen();
-      }, 500);
+      });
     }
   }, 500);
 }
