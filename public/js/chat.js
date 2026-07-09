@@ -584,27 +584,38 @@ async function analyzeWorryWithAI(userText) {
 
 async function processAIResult(aiResult) {
   const pin = getCurrentChatPin();
-  
-  if (pin) {
-    pin.coreIssue = aiResult.coreIssue;
-    pin.reflectionDays = aiResult.reflectionDays;
-    pin.warmExplanation = aiResult.warmExplanation;
-    pin.currentGuides = aiResult.currentGuides;
-    pin.aiAnalyzedAt = Date.now();
-    pin.aiResult = aiResult;
-    pin.reviewReadyAfterDays = aiResult.reflectionDays;
-    pin.aiAnalyzed = true;
-    pin.aiAnalyzing = false;
-    
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-      UserStorage.updateUser(currentUser);
-      UserStorage.setCurrentUser(currentUser.username);
-    }
-    
-    if (DEV_MODE) console.log('[AI DEBUG] AI result saved to pin:', pin.id, 'coreIssue:', aiResult.coreIssue);
-  } else {
+  if (!pin) {
     if (DEV_MODE) console.warn('[AI DEBUG] processAIResult called but no current chat pin found');
+    return;
+  }
+  
+  const currentUser = getCurrentUser();
+  if (!currentUser) {
+    if (DEV_MODE) console.warn('[AI DEBUG] processAIResult called but no currentUser found');
+    return;
+  }
+  
+  const targetPin = currentUser.painPins.find(p => p.id === pin.id);
+  if (!targetPin) {
+    if (DEV_MODE) console.warn('[AI DEBUG] processAIResult pin not found in currentUser:', pin.id);
+    return;
+  }
+  
+  targetPin.coreIssue = aiResult.coreIssue;
+  targetPin.reflectionDays = aiResult.reflectionDays;
+  targetPin.warmExplanation = aiResult.warmExplanation;
+  targetPin.currentGuides = aiResult.currentGuides;
+  targetPin.aiAnalyzedAt = Date.now();
+  targetPin.aiResult = aiResult;
+  targetPin.reviewReadyAfterDays = aiResult.reflectionDays;
+  targetPin.aiAnalyzed = true;
+  targetPin.aiAnalyzing = false;
+  
+  UserStorage.updateUser(currentUser);
+  UserStorage.setCurrentUser(currentUser.username);
+  
+  if (DEV_MODE) {
+    console.log('[AI DEBUG] processAIResult() - pin:', targetPin.id, 'aiAnalyzed:', targetPin.aiAnalyzed, 'coreIssue:', aiResult.coreIssue);
   }
 }
 
@@ -781,6 +792,10 @@ function removeReviewedNeedleWithAnimation() {
   const chatPanel = chatScreen.querySelector('.chat-panel');
   const pinElement = chatScreen.querySelector(`.pin-stuck[data-pin-id="${pinToRemove.id}"]`);
 
+  if (DEV_MODE) {
+    console.log('[PIN DEBUG] removeReviewedNeedleWithAnimation() - pin:', pinToRemove.id, 'DOM element found:', !!pinElement);
+  }
+
   if (chatPanel) {
     chatPanel.classList.add('review-chat-fade-out');
   }
@@ -816,14 +831,24 @@ function removeReviewedNeedleWithAnimation() {
       user.painPins.splice(freshIndex, 1);
     }
     
+    const oldActivePinId = user.activePinId;
+    if (user.activePinId === pinToRemove.id) {
+      user.activePinId = null;
+    }
+    
     user.reviewingPinId = null;
     UserStorage.updateUser(user);
     UserStorage.setCurrentUser(user.username);
     
     if (DEV_MODE) {
       console.log('[PIN DEBUG] Pin archived to resolvedPins:', pinToRemove.id);
+      console.log('[PIN DEBUG] old activePinId:', oldActivePinId);
+      console.log('[PIN DEBUG] new activePinId:', user.activePinId);
+      console.log('[PIN DEBUG] reviewingPinId cleared:', user.reviewingPinId);
       console.log('[PIN DEBUG] resolvedPins count:', user.resolvedPins.length);
       console.log('[PIN DEBUG] remaining painPins count:', user.painPins.length);
+      console.log('[PIN DEBUG] remaining painPins ids:', user.painPins.map(p => p.id));
+      console.log('[PIN DEBUG] resolvedPins ids:', user.resolvedPins.map(p => p.id));
     }
   };
 
@@ -1000,32 +1025,39 @@ function getCurrentChatPin() {
 function saveMessageToPin(pin, sender, text) {
   if (!pin) return;
   
-  if (!pin.chatHistory) {
-    pin.chatHistory = [];
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+  
+  const pinId = pin.id;
+  const targetPin = currentUser.painPins.find(p => p.id === pinId);
+  
+  if (!targetPin) {
+    if (DEV_MODE) console.warn('[CHAT DEBUG] saveMessageToPin() - pin not found in currentUser:', pinId);
+    return;
   }
   
-  pin.chatHistory.push({
+  if (!targetPin.chatHistory) {
+    targetPin.chatHistory = [];
+  }
+  
+  targetPin.chatHistory.push({
     sender,
     text,
     createdAt: Date.now()
   });
   
-  const currentUser = getCurrentUser();
-  if (currentUser) {
-    UserStorage.updateUser(currentUser);
-    UserStorage.setCurrentUser(currentUser.username);
+  const mode = window.STABIT_CHAT_MODE;
+  if (DEV_MODE) {
+    console.log('[CHAT DEBUG] saveMessageToPin() - mode:', mode, 'pin:', pinId, 'sender:', sender, 'chatHistory length:', targetPin.chatHistory.length);
   }
+  
+  UserStorage.updateUser(currentUser);
+  UserStorage.setCurrentUser(currentUser.username);
 }
 
 function saveMessage(sender, text) {
   const pin = getCurrentChatPin();
   saveMessageToPin(pin, sender, text);
-  
-  const currentUser = getCurrentUser();
-  if (currentUser) {
-    UserStorage.updateUser(currentUser);
-    UserStorage.setCurrentUser(currentUser.username);
-  }
 }
 
 function loadPinChatHistory(pin) {
@@ -1083,6 +1115,10 @@ function beginPinCeremony() {
 
     UserStorage.updateUser(currentUser);
     UserStorage.setCurrentUser(currentUser.username);
+    
+    if (DEV_MODE) {
+      console.log('[PIN DEBUG] beginPinCeremony() - pin:', latestPin.id, 'chatHistory length:', latestPin.chatHistory?.length || 0);
+    }
   }
 
   fadeOutChat();
@@ -1105,6 +1141,7 @@ function animatePin() {
   }
   
   const latestPin = currentUser.painPins[currentUser.painPins.length - 1];
+  const pinId = latestPin.id;
   const chatPoint = mapNormalizedPointToZone(latestPin, CHAT_BODY_ZONE);
   
   const projectile = document.createElement('img');
@@ -1139,6 +1176,7 @@ function animatePin() {
     const pinStuck = document.createElement('img');
     pinStuck.className = 'pin-stuck landing';
     pinStuck.src = '/assets/pin/pin-stuck.png';
+    pinStuck.dataset.pinId = pinId;
     pinStuck.style.left = chatPoint.percentX+PIN_STUCK_OFFSET_X + '%';
     pinStuck.style.top = (chatPoint.percentY+PIN_STUCK_OFFSET_Y) + '%';
     pinStuck.style.width = PIN_STUCK_SIZE;
@@ -1150,16 +1188,22 @@ function animatePin() {
     glow.style.top = (chatPoint.percentY) + '%';
     chatScreen.appendChild(glow);
     
-    latestPin.completed = true;
-    latestPin.hasNeedle = true;
-    latestPin.isAnimating = false;
-    
-    if (DEV_MODE) {
-      console.log('[PIN DEBUG] pin marked as completed:', latestPin.x, latestPin.y);
+    const freshUser = getCurrentUser();
+    if (freshUser && freshUser.painPins) {
+      const targetPin = freshUser.painPins.find(p => p.id === pinId);
+      if (targetPin) {
+        targetPin.completed = true;
+        targetPin.hasNeedle = true;
+        targetPin.isAnimating = false;
+        
+        if (DEV_MODE) {
+          console.log('[PIN DEBUG] animatePin() - pin:', targetPin.id, 'completed:', targetPin.completed, 'hasNeedle:', targetPin.hasNeedle, 'chatHistory length:', targetPin.chatHistory?.length || 0);
+        }
+        
+        UserStorage.updateUser(freshUser);
+        UserStorage.setCurrentUser(freshUser.username);
+      }
     }
-    
-    UserStorage.updateUser(currentUser);
-    UserStorage.setCurrentUser(currentUser.username);
     
     playPinImpactSound();
     

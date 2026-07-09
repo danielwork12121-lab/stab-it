@@ -148,58 +148,68 @@ function showReviewPanel() {
   buttonsContainer.className = 'summary-buttons';
   
   const readyBtn = document.createElement('button');
-  readyBtn.className = 'summary-btn';
-  readyBtn.textContent = '我准备放下了';
-  readyBtn.addEventListener('click', () => {
-    reviewingPinId = oldestNeedle.id;
-    window.reviewingPinId = reviewingPinId;
-    
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-      currentUser.reviewingPinId = oldestNeedle.id;
-      UserStorage.updateUser(currentUser);
-      UserStorage.setCurrentUser(currentUser.username);
-    }
-    
-    window.STABIT_CHAT_MODE = 'review';
-    oldestNeedle.reviewIntroShown = true;
-    oldestNeedle.reviewStartedAt = Date.now();
-    UserStorage.updateUser(getCurrentUser());
-    
-    restoreChatPanel();
-    
-    if (window.addMessage) {
-      window.addMessage('system', '—— 回看这根针 ——');
-      window.addMessage('bot', '能说出这句话已经很不容易了。那我们一起确认一下：这份烦恼，现在真的可以放下了吗？');
-    }
-  });
+    readyBtn.className = 'summary-btn';
+    readyBtn.textContent = '我准备放下了';
+    readyBtn.addEventListener('click', () => {
+      const pinId = oldestNeedle.id;
+      reviewingPinId = pinId;
+      window.reviewingPinId = pinId;
+      
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        currentUser.reviewingPinId = pinId;
+        
+        const targetPin = currentUser.painPins.find(p => p.id === pinId);
+        if (targetPin) {
+          targetPin.reviewIntroShown = true;
+          targetPin.reviewStartedAt = Date.now();
+        }
+        
+        UserStorage.updateUser(currentUser);
+        UserStorage.setCurrentUser(currentUser.username);
+      }
+      
+      window.STABIT_CHAT_MODE = 'review';
+      
+      restoreChatPanel();
+      
+      if (window.addMessage) {
+        window.addMessage('system', '—— 回看这根针 ——');
+        window.addMessage('bot', '能说出这句话已经很不容易了。那我们一起确认一下：这份烦恼，现在真的可以放下了吗？');
+      }
+    });
   
   const waitBtn = document.createElement('button');
-  waitBtn.className = 'summary-btn';
-  waitBtn.textContent = '我还想再等等';
-  waitBtn.addEventListener('click', () => {
-    reviewingPinId = oldestNeedle.id;
-    window.reviewingPinId = reviewingPinId;
-    
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-      currentUser.reviewingPinId = oldestNeedle.id;
-      UserStorage.updateUser(currentUser);
-      UserStorage.setCurrentUser(currentUser.username);
-    }
-    
-    window.STABIT_CHAT_MODE = 'review';
-    oldestNeedle.reviewIntroShown = true;
-    oldestNeedle.reviewStartedAt = Date.now();
-    UserStorage.updateUser(getCurrentUser());
-    
-    restoreChatPanel();
-    
-    if (window.addMessage) {
-      window.addMessage('system', '—— 回看这根针 ——');
-      window.addMessage('bot', '没关系，忧忧会再陪它一会儿。你可以再说说，现在最放不下的部分是什么？');
-    }
-  });
+    waitBtn.className = 'summary-btn';
+    waitBtn.textContent = '我还想再等等';
+    waitBtn.addEventListener('click', () => {
+      const pinId = oldestNeedle.id;
+      reviewingPinId = pinId;
+      window.reviewingPinId = pinId;
+      
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        currentUser.reviewingPinId = pinId;
+        
+        const targetPin = currentUser.painPins.find(p => p.id === pinId);
+        if (targetPin) {
+          targetPin.reviewIntroShown = true;
+          targetPin.reviewStartedAt = Date.now();
+        }
+        
+        UserStorage.updateUser(currentUser);
+        UserStorage.setCurrentUser(currentUser.username);
+      }
+      
+      window.STABIT_CHAT_MODE = 'review';
+      
+      restoreChatPanel();
+      
+      if (window.addMessage) {
+        window.addMessage('system', '—— 回看这根针 ——');
+        window.addMessage('bot', '没关系，忧忧会再陪它一会儿。你可以再说说，现在最放不下的部分是什么？');
+      }
+    });
   
   buttonsContainer.appendChild(readyBtn);
   buttonsContainer.appendChild(waitBtn);

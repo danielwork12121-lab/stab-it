@@ -31,16 +31,31 @@ const UserStorage = {
   getCurrentUser() {
     try {
       const data = localStorage.getItem(this.KEY_CURRENT_USER);
-      return data ? JSON.parse(data) : null;
+      if (!data) return null;
+      
+      let username = data;
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed && parsed.username) {
+          username = parsed.username;
+        }
+      } catch {
+      }
+      
+      const user = this.getUser(username);
+      if (DEV_MODE) {
+        console.log('[STORAGE DEBUG] getCurrentUser() - username:', username, 'found:', !!user);
+      }
+      return user || null;
     } catch {
       return null;
     }
   },
 
   setCurrentUser(username) {
-    const user = this.getUser(username);
-    if (user) {
-      localStorage.setItem(this.KEY_CURRENT_USER, JSON.stringify(user));
+    localStorage.setItem(this.KEY_CURRENT_USER, username);
+    if (DEV_MODE) {
+      console.log('[STORAGE DEBUG] setCurrentUser() - username:', username);
     }
   },
 
@@ -49,7 +64,11 @@ const UserStorage = {
   },
 
   updateUser(user) {
-    return this.saveUser(user);
+    const result = this.saveUser(user);
+    if (DEV_MODE) {
+      console.log('[STORAGE DEBUG] updateUser() - username:', user.username, 'painPins count:', user.painPins?.length || 0);
+    }
+    return result;
   },
 
   createNewUser(username, password) {
@@ -78,7 +97,9 @@ function getCurrentUser() { return UserStorage.getCurrentUser(); }
 function setCurrentUser(user) { 
   if (user && user.username) {
     UserStorage.setCurrentUser(user.username);
+  } else if (typeof user === 'string') {
+    UserStorage.setCurrentUser(user);
   } else {
-    localStorage.setItem(UserStorage.KEY_CURRENT_USER, JSON.stringify(user));
+    localStorage.removeItem(UserStorage.KEY_CURRENT_USER);
   }
 }
