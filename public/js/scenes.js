@@ -161,8 +161,6 @@ function showReviewPanel() {
   const coreIssueLine = document.createElement('div');
   coreIssueLine.className = 'summary-line core-issue';
   coreIssueLine.textContent = issueText;
-  coreIssueLine.style.fontSize = '20px';
-  coreIssueLine.style.fontWeight = '600';
   coreIssueLine.style.marginTop = '8px';
   coreIssueLine.style.marginBottom = '12px';
   

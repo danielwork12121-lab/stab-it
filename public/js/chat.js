@@ -292,6 +292,17 @@ function injectChatStyles() {
       text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     }
     
+    .summary-line.core-issue {
+      max-width: 92%;
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.35;
+      text-align: center;
+      word-break: keep-all;
+      overflow-wrap: normal;
+      text-wrap: balance;
+    }
+    
     .summary-line.primary {
       font-size: 20px;
       font-weight: 600;
