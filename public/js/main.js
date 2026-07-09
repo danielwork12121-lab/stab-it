@@ -27,6 +27,8 @@ function restoreAppState() {
       if (DEV_MODE) {
         console.log('[RESTORE DEBUG] Restoring review mode for pin:', pin.id);
         console.log('[RESTORE DEBUG] Chat history length:', pin.chatHistory?.length || 0);
+        console.log('[RESTORE DEBUG] pendingAction:', currentUser.pendingAction);
+        console.log('[RESTORE DEBUG] pendingReviewAction:', currentUser.pendingReviewAction);
       }
       window.STABIT_CHAT_MODE = 'review';
       showChatScreen();
@@ -42,11 +44,26 @@ function restoreAppState() {
             if (DEV_MODE) console.warn('[RESTORE DEBUG] addActionButton not available on window');
           }
         }, 500);
+      } else if (currentUser.pendingAction === 'review_reschedule' && currentUser.pendingReviewAction) {
+        if (DEV_MODE) console.log('[RESTORE DEBUG] Restoring pending review reschedule action');
+        setTimeout(() => {
+          if (window.addReviewChoiceButtons) {
+            window.addReviewChoiceButtons(
+              currentUser.pendingReviewAction.nextReflectionDays,
+              currentUser.pendingReviewAction
+            );
+            if (DEV_MODE) console.log('[RESTORE DEBUG] Review choice buttons restored');
+          } else {
+            if (DEV_MODE) console.warn('[RESTORE DEBUG] addReviewChoiceButtons not available on window');
+          }
+        }, 500);
       }
       return;
     }
     if (DEV_MODE) console.log('[RESTORE DEBUG] reviewingPinId points to missing pin, clearing');
     currentUser.reviewingPinId = null;
+    currentUser.pendingAction = null;
+    currentUser.pendingReviewAction = null;
   }
   
   if (currentUser.activePinId) {
@@ -81,6 +98,7 @@ function restoreAppState() {
   if (currentUser.pendingAction && !currentUser.activePinId && !currentUser.reviewingPinId) {
     if (DEV_MODE) console.log('[RESTORE DEBUG] Clearing orphaned pendingAction:', currentUser.pendingAction);
     currentUser.pendingAction = null;
+    currentUser.pendingReviewAction = null;
   }
   
   UserStorage.updateUser(currentUser);
@@ -111,7 +129,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   chatScreen.addEventListener('click', (e) => {
-    if (window.STABIT_MODE === 'reviewNeedle') {
+    const hasActiveReviewChat = document.querySelector('.chat-panel');
+    
+    if (window.STABIT_MODE === 'reviewNeedle' && 
+        window.STABIT_CHAT_MODE !== 'review' && 
+        !hasActiveReviewChat) {
       const rect = chatScreen.getBoundingClientRect();
       const percentX = ((e.clientX - rect.left) / rect.width) * 100;
       const percentY = ((e.clientY - rect.top) / rect.height) * 100;
