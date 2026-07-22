@@ -29,7 +29,7 @@ const PINNING_SYSTEM_PROMPT = `你是「忧忧」，App「一针 / Stab It」里
 不要把回复写成列表。
 不要编号。
 不要使用 Markdown。
-不要说“作为AI”。
+不要说"作为AI"。
 不要只安慰用户。
 不要只重复用户说过的事件。
 
@@ -58,7 +58,7 @@ const PINNING_SYSTEM_PROMPT = `你是「忧忧」，App「一针 / Stab It」里
 第三部分：
 根据事情严重程度，自然建议一个回看的时间。
 你可以说：
-“我觉得这件事属于中等程度，不如五天后我们再一起回来看看。”
+"我觉得这件事属于中等程度，不如五天后我们再一起回来看看。"
 语气要自然，不要像系统通知。
 
 第四部分：
@@ -81,31 +81,31 @@ const PINNING_SYSTEM_PROMPT = `你是「忧忧」，App「一针 / Stab It」里
 例如：
 
 用户说：
-“男朋友说我天天玩游戏，不认真学习。”
+"男朋友说我天天玩游戏，不认真学习。"
 
 不要写：
-“你因为男朋友说你不上进而难过。”
+"你因为男朋友说你不上进而难过。"
 
 更好写：
-“这次烦恼的核心，好像是你们对学习和休息的期待不同，你希望自己的疲惫能被理解，而他更希望看到你的行动。”
+"这次烦恼的核心，好像是你们对学习和休息的期待不同，你希望自己的疲惫能被理解，而他更希望看到你的行动。"
 
 用户说：
-“朋友一直不回我消息。”
+"朋友一直不回我消息。"
 
 不要写：
-“你因为朋友不回消息很难过。”
+"你因为朋友不回消息很难过。"
 
 更好写：
-“这次让你在意的，好像是不确定这段关系是不是还和以前一样。”
+"这次让你在意的，好像是不确定这段关系是不是还和以前一样。"
 
 用户说：
-“今天考试没考好。”
+"今天考试没考好。"
 
 不要写：
-“你考试没考好。”
+"你考试没考好。"
 
 更好写：
-“这次烦恼的核心，好像是你担心自己的努力没有达到期待。”
+"这次烦恼的核心，好像是你担心自己的努力没有达到期待。"
 
 回看时间规则：
 
@@ -571,7 +571,7 @@ function parseDoubaoContent(data, apiUrl) {
 }
 
 function fallbackResponseForReason(mode, reason) {
-  console.warn('[DOUBAO CHAT] Fallback reason:', reason);
+  console.warn('[AI CHAT] Fallback reason:', reason);
   const fallback = { ...FALLBACK_RESPONSES[mode] };
   fallback.fallbackReason = reason;
   return fallback;
@@ -615,6 +615,7 @@ function buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin) {
 }
 
 async function callDoubaoChat(mode, messages, pin) {
+  const startTime = Date.now();
   const apiKey = process.env.DOUBAO_API_KEY;
   const modelId = process.env.DOUBAO_MODEL_ID;
   const apiUrl = process.env.DOUBAO_API_URL || DEFAULT_API_URL;
@@ -626,6 +627,7 @@ async function callDoubaoChat(mode, messages, pin) {
   console.log('[DOUBAO CHAT] API key prefix:', apiKeyPrefix);
 
   if (!apiKey || !modelId) {
+    console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
     return fallbackResponseForReason(mode, 'missing_api_key_or_model_id');
   }
 
@@ -648,6 +650,7 @@ async function callDoubaoChat(mode, messages, pin) {
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
+      console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
       return fallbackResponseForReason(mode, `http_${response.status}:${errorBody.substring(0, 120)}`);
     }
 
@@ -656,33 +659,173 @@ async function callDoubaoChat(mode, messages, pin) {
     const content = parseDoubaoContent(data, apiUrl);
 
     if (!content) {
+      console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
       return fallbackResponseForReason(mode, 'missing_output_text');
     }
 
     console.log('[DOUBAO CHAT] Extracted content length:', content.length);
 
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return fallbackResponseForReason(mode, 'no_json_object_in_output_text');
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      return fallbackResponseForReason(mode, 'json_parse_failed');
-    }
-
-    if (validateChatResponse(parsed)) {
-      console.log('[DOUBAO CHAT] JSON validated successfully:', parsed);
-      return parsed;
+    const parsedResponse = parseAndValidateResponse(content, mode);
+    console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
+    
+    if (parsedResponse) {
+      return parsedResponse;
     }
 
     return fallbackResponseForReason(mode, 'invalid_response_shape');
 
   } catch (error) {
+    console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
     return fallbackResponseForReason(mode, `exception:${error.message}`);
   }
+}
+
+function parseAndValidateResponse(content, mode) {
+  if (!content) return null;
+  
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    return null;
+  }
+
+  if (validateChatResponse(parsed)) {
+    console.log('[AI CHAT] JSON validated successfully');
+    return parsed;
+  }
+
+  return null;
+}
+
+function buildMinimaxChatBody(modelId, mode, messages, pin) {
+  const systemPrompt = mode === 'review' ? REVIEW_SYSTEM_PROMPT : PINNING_SYSTEM_PROMPT;
+  const systemMessage = {
+    role: 'system',
+    content: systemPrompt
+  };
+
+  const pinInfoMessage = pin ? {
+    role: 'system',
+    content: `当前针的信息：核心问题=${pin.coreIssue || '未分析'}，建议回看天数=${pin.reflectionDays || 0}，温柔解释=${pin.warmExplanation || '无'}，引导=${pin.currentGuides ? pin.currentGuides.join('；') : '无'}，AI分析结果=${JSON.stringify(pin.aiResult || {})}，回顾历史=${JSON.stringify(pin.reviewHistory || [])}，回顾次数=${pin.reviewCount || 0}，创建时间=${pin.createdAt ? new Date(pin.createdAt).toLocaleString('zh-CN') : '未知'}，模式=${mode}，reviewStage=${pin.reviewStage || '未设置'}，用户回顾选择=${pin.pendingReviewChoice || '未选择'}`
+  } : null;
+
+  const allMessages = [systemMessage];
+  if (pinInfoMessage) {
+    allMessages.push(pinInfoMessage);
+  }
+  allMessages.push(...messages);
+
+  return {
+    model: modelId,
+    messages: allMessages,
+    temperature: 0.4
+  };
+}
+
+function getMinimaxApiKey() {
+  return process.env.MINIMAX_API_KEY || 
+         process.env.MINIMAX_KEY || 
+         process.env.MINIMAX_TOKEN || 
+         process.env.MINI_MAX_API_KEY;
+}
+
+async function callMinimaxChat(mode, messages, pin) {
+  const startTime = Date.now();
+  const apiKey = getMinimaxApiKey();
+  const modelId = process.env.MINIMAX_MODEL_ID;
+  const apiUrl = process.env.MINIMAX_API_URL || 'https://api.minimaxi.com/v1';
+
+  const apiKeyPrefix = apiKey ? apiKey.substring(0, 8) + '...' : 'MISSING';
+  console.log('[MINIMAX CHAT] Endpoint:', apiUrl);
+  console.log('[MINIMAX CHAT] Model:', modelId || 'MISSING');
+  console.log('[MINIMAX CHAT] API key exists:', !!apiKey);
+  console.log('[MINIMAX CHAT] API key prefix:', apiKeyPrefix);
+
+  if (!apiKey || !modelId) {
+    console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+    return fallbackResponseForReason(mode, 'minimax_missing_api_key_or_model_id');
+  }
+
+  const body = buildMinimaxChatBody(modelId, mode, messages, pin);
+
+  try {
+    console.log('[MINIMAX CHAT] Calling API with body length:', JSON.stringify(body).length);
+    
+    const response = await fetch(`${apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    });
+
+    console.log('[MINIMAX CHAT] Minimax response status:', response.status);
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+      return fallbackResponseForReason(mode, `minimax_http_${response.status}:${errorBody.substring(0, 120)}`);
+    }
+
+    const data = await response.json();
+
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+      return fallbackResponseForReason(mode, 'minimax_missing_content');
+    }
+
+    console.log('[MINIMAX CHAT] Raw content length:', content.length);
+
+    const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    
+    const parsedResponse = parseAndValidateResponse(cleanContent, mode);
+    console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+    
+    if (parsedResponse) {
+      return parsedResponse;
+    }
+
+    return fallbackResponseForReason(mode, 'minimax_invalid_response_shape');
+
+  } catch (error) {
+    console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+    return fallbackResponseForReason(mode, `minimax_exception:${error.message}`);
+  }
+}
+
+async function callAIChatWithFallback(mode, messages, pin) {
+  const provider = process.env.AI_PROVIDER || 'doubao';
+  const fallbackProvider = process.env.AI_FALLBACK_PROVIDER || 'none';
+  
+  console.log('[AI CHAT] Selected provider:', provider);
+  console.log('[AI CHAT] Fallback provider:', fallbackProvider);
+
+  let result;
+  let usedFallback = false;
+
+  if (provider === 'minimax') {
+    result = await callMinimaxChat(mode, messages, pin);
+    
+    if (!validateChatResponse(result) && fallbackProvider === 'doubao') {
+      console.log('[AI CHAT] Minimax failed, falling back to Doubao');
+      usedFallback = true;
+      result = await callDoubaoChat(mode, messages, pin);
+    }
+  } else {
+    result = await callDoubaoChat(mode, messages, pin);
+  }
+
+  console.log('[AI CHAT] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validateChatResponse(result));
+  
+  return { result, usedFallback, provider };
 }
 
 export default async function handler(req, res) {
@@ -697,18 +840,21 @@ export default async function handler(req, res) {
 
   const { mode, messages, pin } = req.body;
 
-  console.log('[DOUBAO CHAT] handler called with mode:', mode, 'messages count:', messages.length);
+  console.log('[AI CHAT] handler called with mode:', mode, 'messages count:', messages.length);
 
-  let result = await callDoubaoChat(mode, messages, pin);
+  const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin);
 
   if (!validateChatResponse(result)) {
-    console.warn('[DOUBAO CHAT] First attempt returned invalid response, retrying once');
-    result = await callDoubaoChat(mode, messages, pin);
+    console.warn('[AI CHAT] First attempt returned invalid response, retrying once');
+    const retryResult = await callAIChatWithFallback(mode, messages, pin);
+    if (validateChatResponse(retryResult.result)) {
+      Object.assign(result, retryResult.result);
+    }
   }
 
   if (!validateChatResponse(result)) {
-    console.warn('[DOUBAO CHAT] Retry also failed, using fallback');
-    result = fallbackResponseForReason(mode, 'retry_failed');
+    console.warn('[AI CHAT] Retry also failed, using fallback');
+    Object.assign(result, fallbackResponseForReason(mode, 'retry_failed'));
   }
 
   if (result.review) {
@@ -720,5 +866,6 @@ export default async function handler(req, res) {
     }
   }
 
+  console.log('[AI CHAT] Final response - provider:', provider, '| usedFallback:', usedFallback);
   res.status(200).json(result);
 }

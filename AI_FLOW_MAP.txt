@@ -1,0 +1,391 @@
+================================================================================
+ MANDATORY BEFORE ANY PATCH
+================================================================================
+1. Read this file first.
+2. Identify the transition number affected by the requested change.
+3. Inspect the exact functions listed in that transition.
+4. Patch the existing function path only.
+5. Do not create duplicate login/chat/review/reschedule/unpin/audio systems.
+6. After patching, report which transition and functions changed.
+7. Run node --check on changed JS files.
+8. Never commit .env, .env.local, .vercel, or API keys.
+
+================================================================================
+ PROJECT PURPOSE
+================================================================================
+StabIt / 忧忧 lets users pin worries, chat with AI, review later, then remove or reschedule pins.
+The app loop must always return to Home/Stuffy after removal or reschedule.
+
+================================================================================
+ EXACT USER / AI ACTION TRANSITION MAP
+================================================================================
+
+--- TRANSITION 1: APP LOAD ---
+Trigger: Browser loads page, DOMContentLoaded fires
+First: document.addEventListener('DOMContentLoaded', ...) [main.js]
+Follow-up: initAuth() [auth.js], initAudio() [audio.js], restoreAppState() [main.js]
+State read: UserStorage.getCurrentUser(), activePinId, reviewingPinId
+State mutated: None
+API: None
+UI: No user → showAuthScreen(); reviewingPinId exists → showChatScreen(); activePinId exists → showChatScreen(); else → showHomeScreen()
+DO NOT: Create separate auth check; bypass restoreAppState()
+
+--- TRANSITION 2: REGISTER ---
+Trigger: User clicks #register-button
+First: handleRegister() [auth.js]
+Follow-up: validateUsername(), validatePassword(), UserStorage.getUser(), UserStorage.createNewUser(), showAuthMessage()
+State read: usernameInput.value, passwordInput.value, UserStorage.getUsers()
+State mutated: Creates user with: username, password, createdAt, companionDays=1, painPins=[], resolvedPins=[], chatHistory=[], settings={}, progression={}
+API: None
+UI: Success → "注册成功，请点击登录进入"; Error → "这个昵称已经被注册了" or "请填写昵称和密码"
+DO NOT: Create separate registration storage; bypass UserStorage.createNewUser()
+
+--- TRANSITION 3: LOGIN ---
+Trigger: User clicks #login-button
+First: handleLogin() [auth.js]
+Follow-up: validateUsername(), validatePassword(), UserStorage.getUser(), UserStorage.setCurrentUser(), showAuthMessage(), setTimeout → showHomeScreen()
+State read: usernameInput.value, passwordInput.value, UserStorage.getUser()
+State mutated: localStorage.setItem('stabItCurrentUser', username)
+API: None
+UI: Success → "登录成功，正在进入忧忧…" → home after 600ms; Error → "昵称或密码不正确"
+DO NOT: Create custom login validation; bypass UserStorage
+
+--- TRANSITION 4: HOME PIN CREATION ---
+Trigger: User clicks valid Stuffy body area on #home-screen
+First: homeScreen.addEventListener('click', ...) [main.js]
+Follow-up: isInsideBodyZone() [coords.js], createPainDot() [scenes.js], savePainDot() [scenes.js], showHomeMessage(), setTimeout → goToChatScene() [scenes.js]
+State read: getCurrentUser(), STUFFY_BODY_ZONE
+State mutated: painPins.push(newPin), newPin fields: id, x(0-1), y(0-1), createdAt, chatHistory=[]; activePinId=newPin.id; reviewingPinId=null; STABIT_CHAT_MODE='pinning'
+API: None
+UI: Pain dot appears; message "烦恼已经被忧忧接住了。"; transitions to chat after 1s
+DO NOT: Create custom coordinate normalization; bypass savePainDot()
+
+--- TRANSITION 5: PINNING CHAT SEND ---
+Trigger: User clicks sendBtn or presses Enter
+First: sendMessage() [chat.js]
+Follow-up: addMessage('user'), saveMessage(), addMessage('bot', '…'), callAIChat(), processChatAIResponse(), analyzeWorryWithAI() (if not analyzed)
+State read: getCurrentUser(), getCurrentChatPin(), STABIT_CHAT_MODE
+State mutated: pin.chatHistory.push({sender, text, createdAt}), pin.aiAnalyzing=true
+API: POST /api/ai/chat (mode: "pinning", 3min timeout), POST /api/ai/analyze-worry (15s timeout)
+UI: User message; "..." loading bubble; AI reply replaces bubble; background analysis has no UI
+DO NOT: Create custom message saving; bypass callAIChat()
+
+--- TRANSITION 6: /api/ai/analyze-worry API ---
+Trigger: Pinning mode, pin.aiAnalyzed=false
+First: analyzeWorryWithAI(userText) [chat.js]
+Follow-up: processAIResult(aiResult) [chat.js]
+State read: getCurrentChatPin(), getCurrentUser()
+State mutated: pin.coreIssue, pin.reflectionDays, pin.warmExplanation, pin.currentGuides, pin.aiResult, pin.aiAnalyzed=true, pin.aiAnalyzing=false, pin.aiAnalyzedAt, pin.reviewReadyAfterDays
+API: POST /api/ai/analyze-worry
+UI: No visual change
+DO NOT: Call in review mode; create fake chat messages; bypass processAIResult()
+
+--- TRANSITION 7: /api/ai/chat PINNING RESPONSE ---
+Trigger: Backend returns pinning AI response
+First: processChatAIResponse(aiResponse) [chat.js]
+Follow-up: addMessage('bot', reply), saveMessage(), (if analysis) save to pin fields, (if readyToPin) setTimeout → addActionButton('交给忧忧', callback)
+State read: getCurrentUser(), getCurrentChatPin(), STABIT_CHAT_MODE
+State mutated: (if analysis) same as transition 6; (if readyToPin) pendingAction='pin'
+API: None
+UI: readyToPin=false → AI reply only; readyToPin=true → AI reply + purple gradient button "交给忧忧"
+DO NOT: Create separate action button systems; bypass addActionButton()
+
+--- TRANSITION 8: USER CLICKS "交给忧忧" ---
+Trigger: Pinning action button clicked
+First: beginPinCeremony() [chat.js]
+Follow-up: fadeOutChat(), setTimeout(700ms) → animatePin(), playPinImpactSound() [audio.js], setTimeout(850ms) → showSummaryPanel() [chat.js]
+State read: getCurrentUser(), painPins[last], CHAT_BODY_ZONE
+State mutated: pin.completed=true, pin.hasNeedle=true, pin.isAnimating=false
+API: None
+UI: Chat fades; pin flies to position; pin sticks with glow; summary panel; fast-forward button: "快进 X 天" (X=pin.reflectionDays || DEMO_FAST_FORWARD_DAYS)
+DO NOT: Create custom pin animation; bypass animatePin()
+
+--- TRANSITION 9: FAST-FORWARD ---
+Trigger: User clicks "快进 X 天" button
+First: fastForwardBtn.addEventListener('click', ...) [chat.js]
+Follow-up: fastForwardCompanionDays(reviewDays) [scenes.js], STABIT_MODE='reviewNeedle', setTimeout(100ms) → showReviewPanel() [scenes.js]
+State read: getCurrentChatPin().reflectionDays, companionDayOffset
+State mutated: companionDayOffset += reviewDays
+API: None
+UI: Day badge updates; review panel opens directly
+DO NOT: Route through home screen; create separate day increment
+
+--- TRANSITION 10: REVIEW PANEL ---
+Trigger: showReviewPanel() called
+First: showReviewPanel() [scenes.js]
+Follow-up: findOldestCompletedNeedle() [scenes.js], create 3 buttons:
+  - "会，它还会影响我" → enterReviewChat(pinId, '会，它还会影响我。')
+  - "有一点儿，但是没当时那么难受了" → enterReviewChat(pinId, '有一点儿...')
+  - "不会了，好像已经忘记这件事儿了" → directRemoveNeedle(pinId)
+State read: painPins, pin.coreIssue, pin.chatHistory
+State mutated: None
+API: None
+UI: Summary panel with core issue; question "现在，它还影响着你的情绪吗？"; three purple buttons
+DO NOT: Create custom review panel; bypass findOldestCompletedNeedle()
+
+--- TRANSITION 11: DIRECT RELEASE ("不会了...") ---
+Trigger: User clicks "不会了，好像已经忘记这件事儿了"
+First: directRemoveNeedle(pinId) [scenes.js]
+Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(500ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), showReleaseCelebrationButton(onContinue), onContinue → showHomeScreen(), setTimeout(300ms) → showReleaseConfettiOverlay() + showReleaseCelebrationText()
+State read: painPins (find by pinId)
+State mutated: pin moved from painPins to resolvedPins (preserving chatHistory); resolvedPin.status='resolved', resolvedAt, hasNeedle=false; activePinId=null; reviewingPinId=null; pendingAction=null; pendingReviewAction=null
+API: None
+UI: Chat fades; needle animates down (1200ms); ripple; celebration button; after click → home with confetti (3s) + celebration text; AudioManager.playCelebrationSound()
+DO NOT: Create separate removal logic; bypass archiveAndRemovePin(); forget celebration button
+
+--- TRANSITION 12: REVIEW CHAT ENTRY ---
+Trigger: User clicks "会..." or "有一点儿..." button
+First: enterReviewChat(pinId, contextMessage) [scenes.js]
+Follow-up: reviewingPinId=pinId, reviewStage='initial_review_analysis', pendingReviewChoice=contextMessage, STABIT_CHAT_MODE='review', STABIT_MODE=null, restoreChatPanel(), addMessage('system', '—— 回看这根针 ——'), setTimeout(600ms) → sendAutoReviewMessage(contextMessage), callAIChat()
+State read: getCurrentUser(), painPins
+State mutated: reviewingPinId=pinId, reviewStage='initial_review_analysis', pendingReviewChoice=contextMessage, pin.reviewIntroShown=true, pin.reviewStartedAt=Date.now()
+API: POST /api/ai/chat (mode: "review")
+UI: Chat restored; separator; user's choice; AI responds with diagnostic question
+DO NOT: Create custom review chat init; bypass sendAutoReviewMessage()
+
+--- TRANSITION 13: REVIEW DIAGNOSTIC RESPONSE ---
+Trigger: AI responds to auto review message
+First: processChatAIResponse(aiResponse) [chat.js]
+Follow-up: addMessage('bot', reply), saveMessage()
+State read: STABIT_CHAT_MODE='review', reviewStage='initial_review_analysis'
+State mutated: None
+API: None
+UI: AI shows diagnostic question; NO reschedule/remove buttons
+DO NOT: Show action buttons during diagnostic phase
+
+--- TRANSITION 14: REVIEW FOLLOW-UP USER MESSAGE ---
+Trigger: User sends follow-up message
+First: sendMessage() [chat.js]
+Follow-up: addMessage('user'), saveMessage(), (if reviewStage='awaiting_user_reason') reviewStage='followup_response', addMessage('bot', '…'), callAIChat()
+State read: STABIT_CHAT_MODE='review', reviewStage
+State mutated: (if reviewStage='awaiting_user_reason') reviewStage='followup_response'
+API: POST /api/ai/chat (mode: "review"); NO analyze-worry
+UI: User message; loading; AI responds with analysis
+DO NOT: Call analyze-worry in review mode
+
+--- TRANSITION 15: REVIEW API RESPONSE ---
+Trigger: Backend returns review AI response
+First: processChatAIResponse(aiResponse) [chat.js]
+Response schema: reply, readyToPin=false, readyToRemove, review.stillAffectsUser, review.reasonCategory, review.nextReflectionDays
+Follow-up: addMessage('bot', reply), saveMessage(), (if readyToRemove) pendingAction='remove' → addActionButton('轻轻取下这根针', removeReviewedNeedleWithAnimation), (if !readyToRemove && nextReflectionDays) reviewStage='review_conversation' → pendingAction='review_reschedule' → addReviewChoiceButtons()
+State read: STABIT_CHAT_MODE='review', currentUser
+State mutated: pendingAction, pendingReviewAction, reviewStage
+API: None
+UI: readyToRemove=true → "轻轻取下这根针"; !readyToRemove + nextReflectionDays → "继续聊聊" + "X天后再看看"
+DO NOT: Create custom review response handling
+
+--- TRANSITION 16: "继续聊聊" BUTTON ---
+Trigger: User clicks "继续聊聊"
+First: continueBtn.addEventListener('click', ...) [chat.js]
+Follow-up: Remove .chat-action-button elements, pendingAction=null, pendingReviewAction=null
+State read: chatLog, getCurrentUser()
+State mutated: pendingAction=null, pendingReviewAction=null
+API: None
+UI: Choice buttons removed; stay in review chat
+DO NOT: Mutate pin schedule; archive pin; navigate away
+
+--- TRANSITION 17: "X天后再看看" BUTTON ---
+Trigger: User clicks "X天后再看看"
+First: rescheduleReview(nextReflectionDays, reviewData) [chat.js]
+Follow-up: getCurrentCompanionDay(), update pin fields: lastReviewedAt, lastReviewedDay, reviewCount++, reflectionDays=validDays, reviewDay=currentDay+validDays, latestReview, reviewHistory.push({...}), clear review state: reviewingPinId=null, pendingAction=null, pendingReviewAction=null, reviewStage=null, window.reviewingPinId=null, STABIT_CHAT_MODE=null, showHomeScreen()
+State read: getCurrentUser(), getCurrentCompanionDay(), pin.reviewCount, pin.reviewHistory
+State mutated: pin.lastReviewedAt, lastReviewedDay, reviewCount, reflectionDays, reviewDay, latestReview, reviewHistory; currentUser.reviewingPinId=null, pendingAction=null, pendingReviewAction=null, reviewStage=null
+API: None
+UI: Return to home; needle remains visible
+DO NOT: Remove/archive pin; forget to clear review state
+
+--- TRANSITION 18: REVIEW REMOVE BUTTON ("轻轻取下这根针") ---
+Trigger: User clicks "轻轻取下这根针"
+First: removeReviewedNeedleWithAnimation() [chat.js]
+Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(450ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, chatPanel.remove(), showReleaseCelebrationButton(onContinue), onContinue → showHomeScreen(), setTimeout(300ms) → showReleaseConfettiOverlay() + showReleaseCelebrationText()
+State read: reviewingPinId or window.reviewingPinId, painPins
+State mutated: pin moved to resolvedPins; activePinId=null; reviewingPinId=null; STABIT_CHAT_MODE='pinning'
+API: None
+UI: Same as transition 11; AudioManager.playCelebrationSound()
+DO NOT: Create separate removal animation
+
+--- TRANSITION 19: FALLBACK / ERROR BEHAVIOR ---
+Trigger: API fails/timeout/billing/malformed JSON
+First: callAIChat() error handler [chat.js]
+Follow-up: addMessage('bot', '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。'), remove loading bubble
+State read: None
+State mutated: None (fallback not saved)
+API: None
+UI: Temporary fallback message; loading removed; NO action buttons
+DO NOT: Save fallback to chatHistory; create permanent fallback states; trigger buttons
+
+--- TRANSITION 20: AUDIO RULES ---
+Trigger: Various actions
+initAudio() → AudioManager.initAudio() [audio.js]: creates Audio objects for bgm, impactAudio, celebrationAudio
+First gesture → AudioManager.isUnlocked=true, AudioManager.startBackgroundMusic()
+animatePin() → playPinImpactSound() [audio.js]
+showReleaseConfettiOverlay() → AudioManager.playCelebrationSound() (debounced 1s)
+Rules: BGM on first gesture only; impact on pin ceremony; celebration ONLY on confetti
+DO NOT: Create separate audio systems; play celebration sound on reschedule
+
+================================================================================
+ CORE STATE FIELDS
+================================================================================
+
+USER STATE (currentUser):
+- username: string
+- password: string
+- createdAt: timestamp
+- painPins: array (active pins)
+- resolvedPins: array (archived pins)
+- activePinId: string (current pin being created)
+- reviewingPinId: string (current pin being reviewed)
+- pendingAction: 'pin' | 'remove' | 'review_reschedule' | null
+- pendingReviewAction: object (review data for reschedule)
+- reviewStage: 'initial_review_analysis' | 'awaiting_user_reason' | 'followup_response' | 'review_conversation' | null
+- companionDayOffset: number
+- firstCompanionDate: timestamp
+- chatHistory: array (deprecated)
+- settings: object
+- progression: object
+
+PIN STATE (pin):
+- id: string
+- x: number (0-1 normalized)
+- y: number (0-1 normalized)
+- createdAt: timestamp
+- completed: boolean
+- hasNeedle: boolean
+- isAnimating: boolean
+- chatHistory: array
+- coreIssue: string
+- reflectionDays: number
+- warmExplanation: string
+- currentGuides: string[]
+- aiResult: object
+- aiAnalyzed: boolean
+- aiAnalyzing: boolean
+- reviewDay: number
+- reviewCount: number
+- reviewHistory: array
+- reviewIntroShown: boolean
+- reviewStartedAt: timestamp
+- lastReviewedAt: timestamp
+- lastReviewedDay: number
+- latestReview: object
+
+================================================================================
+ GLOBAL STATE VARIABLES
+================================================================================
+
+window.STABIT_CHAT_MODE: 'pinning' | 'review' | null (determines which pin to use)
+window.STABIT_MODE: 'reviewNeedle' | null (marks review mode)
+window.reviewingPinId: string | null (mirror of currentUser.reviewingPinId)
+DEV_MODE: boolean (public/js/config.js)
+AI_CHAT_TIMEOUT_MS: 180000 (3 minutes, chat.js)
+DEMO_FAST_FORWARD_DAYS: 3 (config.js)
+
+================================================================================
+ FUNCTION INDEX BY TRANSITION
+================================================================================
+
+function | file | transitions
+---------|------|-------------
+initAuth | public/js/auth.js | 1
+initAudio | public/js/audio.js | 1
+restoreAppState | public/js/main.js | 1
+handleRegister | public/js/auth.js | 2
+validateUsername | public/js/auth.js | 2,3
+validatePassword | public/js/auth.js | 2,3
+UserStorage.getUser | public/js/storage.js | 2,3
+UserStorage.createNewUser | public/js/storage.js | 2
+UserStorage.setCurrentUser | public/js/storage.js | 3
+showHomeScreen | public/js/scenes.js | 3,11,17,18
+isInsideBodyZone | public/js/coords.js | 4
+createPainDot | public/js/scenes.js | 4
+savePainDot | public/js/scenes.js | 4
+goToChatScene | public/js/scenes.js | 4
+sendMessage | public/js/chat.js | 5,14
+addMessage | public/js/chat.js | 5,7,13,14,15,19
+saveMessage | public/js/chat.js | 5,7,13,14,15
+callAIChat | public/js/chat.js | 5,12,14
+processChatAIResponse | public/js/chat.js | 5,7,13,15
+analyzeWorryWithAI | public/js/chat.js | 6
+processAIResult | public/js/chat.js | 6
+beginPinCeremony | public/js/chat.js | 8
+fadeOutChat | public/js/chat.js | 8
+animatePin | public/js/chat.js | 8
+playPinImpactSound | public/js/audio.js | 8
+showSummaryPanel | public/js/chat.js | 8
+fastForwardCompanionDays | public/js/scenes.js | 9
+showReviewPanel | public/js/scenes.js | 9,10
+findOldestCompletedNeedle | public/js/scenes.js | 10
+enterReviewChat | public/js/scenes.js | 10,12
+directRemoveNeedle | public/js/scenes.js | 10,11
+sendAutoReviewMessage | public/js/chat.js | 12
+addActionButton | public/js/chat.js | 7,15
+addReviewChoiceButtons | public/js/chat.js | 15
+rescheduleReview | public/js/chat.js | 17
+removeReviewedNeedleWithAnimation | public/js/chat.js | 15,18
+showReleaseCelebrationButton | public/js/chat.js | 11,18
+showReleaseConfettiOverlay | public/js/chat.js | 11,18
+showReleaseCelebrationText | public/js/chat.js | 11,18
+AudioManager.playCelebrationSound | public/js/audio.js | 11,18
+
+================================================================================
+ API CONTRACTS
+================================================================================
+
+POST /api/ai/chat (3min timeout)
+Request:
+{
+  "mode": "pinning" | "review",
+  "messages": [{"role": "user" | "assistant", "content": "text"}],
+  "pin": {coreIssue, reflectionDays, warmExplanation, currentGuides, aiResult, reviewHistory, reviewCount, createdAt, reviewStage, pendingReviewChoice}
+}
+
+Response (pinning):
+{
+  "reply": string,
+  "readyToPin": boolean,
+  "readyToRemove": false,
+  "analysis": {safe, coreIssue, reflectionDays, warmExplanation, currentGuides}
+}
+
+Response (review):
+{
+  "reply": string,
+  "readyToPin": false,
+  "readyToRemove": boolean,
+  "review": {stillAffectsUser, reasonCategory, nextReflectionDays}
+}
+
+POST /api/ai/analyze-worry (15s timeout)
+Request: {"userText": string}
+Response: {safe, coreIssue, reflectionDays, warmExplanation, currentGuides}
+
+================================================================================
+ SAFE PATCH CHECKLIST
+================================================================================
+1. READ AI_FLOW_MAP.txt FIRST
+2. REUSE EXACT FUNCTIONS - do not create parallel systems
+3. NO DUPLICATE LOGIC - auth, chat, storage, audio have single sources
+4. RUN node --check ON MODIFIED FILES
+5. NEVER COMMIT .env, .env.local, .vercel, OR API KEYS
+6. DO NOT CHANGE APP LOGIC - preserve state mutations and API contracts
+7. ADD DEV LOGS for new features
+8. TEST BOTH PINNING AND REVIEW FLOWS
+9. VERIFY CELEBRATION FLOW (confetti + sound)
+
+================================================================================
+ UNCERTAIN / NEEDS VERIFICATION
+================================================================================
+- reviewStage='awaiting_user_reason': Checked in chat.js:808 but never explicitly set in JS. May be set by backend or is a legacy value.
+- showPostRemovalScreen: Exists in chat.js:1452. Called after removeReviewedNeedleWithAnimation when remaining completed pins exist. Not fully tested in all flows.
+
+================================================================================
+ TESTING CHECKLIST
+================================================================================
+- node --check public/js/auth.js
+- node --check public/js/main.js
+- node --check public/js/scenes.js
+- node --check public/js/chat.js
+- node --check public/js/audio.js
+- node --check public/js/coords.js
+- node --check api/ai/chat.js
+- node --check api/ai/analyze-worry.js

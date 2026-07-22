@@ -119,8 +119,31 @@ function parseDoubaoContent(data, apiUrl) {
 }
 
 function fallbackWithReason(reason) {
-  console.warn('[DOUBAO] Fallback reason:', reason);
+  console.warn('[AI ANALYZE] Fallback reason:', reason);
   return FALLBACK_RESPONSE;
+}
+
+function parseAndValidateAnalysis(content) {
+  if (!content) return null;
+  
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    return null;
+  }
+
+  if (validateJson(parsed)) {
+    console.log('[AI ANALYZE] JSON validated successfully');
+    return parsed;
+  }
+
+  return null;
 }
 
 function buildDoubaoBody(apiKey, modelId, apiUrl, userText) {
@@ -157,6 +180,7 @@ function buildDoubaoBody(apiKey, modelId, apiUrl, userText) {
 }
 
 async function callDoubaoApi(userText) {
+  const startTime = Date.now();
   const apiKey = process.env.DOUBAO_API_KEY;
   const modelId = process.env.DOUBAO_MODEL_ID;
   const apiUrl = process.env.DOUBAO_API_URL || DEFAULT_API_URL;
@@ -168,6 +192,7 @@ async function callDoubaoApi(userText) {
   console.log('[DOUBAO] API key prefix:', apiKeyPrefix);
 
   if (!apiKey || !modelId) {
+    console.log('[DOUBAO] Elapsed:', Date.now() - startTime, 'ms');
     return fallbackWithReason('missing_api_key_or_model_id');
   }
 
@@ -199,6 +224,7 @@ async function callDoubaoApi(userText) {
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
+      console.log('[DOUBAO] Elapsed:', Date.now() - startTime, 'ms');
       return fallbackWithReason(`http_${response.status}:${errorBody.substring(0, 120)}`);
     }
 
@@ -207,36 +233,141 @@ async function callDoubaoApi(userText) {
     const content = parseDoubaoContent(data, apiUrl);
 
     if (!content) {
+      console.log('[DOUBAO] Elapsed:', Date.now() - startTime, 'ms');
       return fallbackWithReason('missing_output_text');
     }
 
     console.log('[DOUBAO] Extracted content length:', content.length);
 
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return fallbackWithReason('no_json_object_in_output_text');
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      return fallbackWithReason('json_parse_failed');
-    }
-
-    if (validateJson(parsed)) {
-      console.log('[DOUBAO] JSON validated successfully:', parsed);
-      return parsed;
+    const parsedResponse = parseAndValidateAnalysis(content);
+    console.log('[DOUBAO] Elapsed:', Date.now() - startTime, 'ms');
+    
+    if (parsedResponse) {
+      return parsedResponse;
     }
 
     return fallbackWithReason('invalid_response_shape');
 
   } catch (error) {
+    console.log('[DOUBAO] Elapsed:', Date.now() - startTime, 'ms');
     if (error.name === 'AbortError') {
       return fallbackWithReason('request_timeout');
     }
     return fallbackWithReason(`exception:${error.message}`);
   }
+}
+
+function getMinimaxApiKey() {
+  return process.env.MINIMAX_API_KEY || 
+         process.env.MINIMAX_KEY || 
+         process.env.MINIMAX_TOKEN || 
+         process.env.MINI_MAX_API_KEY;
+}
+
+async function callMinimaxApi(userText) {
+  const startTime = Date.now();
+  const apiKey = getMinimaxApiKey();
+  const modelId = process.env.MINIMAX_MODEL_ID;
+  const apiUrl = process.env.MINIMAX_API_URL || 'https://api.minimaxi.com/v1';
+
+  const apiKeyPrefix = apiKey ? apiKey.substring(0, 8) + '...' : 'MISSING';
+  console.log('[MINIMAX] Endpoint:', apiUrl);
+  console.log('[MINIMAX] Model:', modelId || 'MISSING');
+  console.log('[MINIMAX] API key exists:', !!apiKey);
+  console.log('[MINIMAX] API key prefix:', apiKeyPrefix);
+
+  if (!apiKey || !modelId) {
+    console.log('[MINIMAX] Elapsed:', Date.now() - startTime, 'ms');
+    return fallbackWithReason('minimax_missing_api_key_or_model_id');
+  }
+
+  const body = {
+    model: modelId,
+    messages: [
+      {
+        role: 'system',
+        content: SYSTEM_PROMPT
+      },
+      {
+        role: 'user',
+        content: userText
+      }
+    ],
+    temperature: 0.4
+  };
+
+  try {
+    console.log('[MINIMAX] Calling API with body length:', JSON.stringify(body).length);
+    
+    const response = await fetch(`${apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    });
+
+    console.log('[MINIMAX] Minimax response status:', response.status);
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.log('[MINIMAX] Elapsed:', Date.now() - startTime, 'ms');
+      return fallbackWithReason(`minimax_http_${response.status}:${errorBody.substring(0, 120)}`);
+    }
+
+    const data = await response.json();
+
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.log('[MINIMAX] Elapsed:', Date.now() - startTime, 'ms');
+      return fallbackWithReason('minimax_missing_content');
+    }
+
+    console.log('[MINIMAX] Raw content length:', content.length);
+
+    const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    
+    const parsedResponse = parseAndValidateAnalysis(cleanContent);
+    console.log('[MINIMAX] Elapsed:', Date.now() - startTime, 'ms');
+    
+    if (parsedResponse) {
+      return parsedResponse;
+    }
+
+    return fallbackWithReason('minimax_invalid_response_shape');
+
+  } catch (error) {
+    console.log('[MINIMAX] Elapsed:', Date.now() - startTime, 'ms');
+    return fallbackWithReason(`minimax_exception:${error.message}`);
+  }
+}
+
+async function callAIAnalyzeWithFallback(userText) {
+  const provider = process.env.AI_PROVIDER || 'doubao';
+  const fallbackProvider = process.env.AI_FALLBACK_PROVIDER || 'none';
+  
+  console.log('[AI ANALYZE] Selected provider:', provider);
+  console.log('[AI ANALYZE] Fallback provider:', fallbackProvider);
+
+  let result;
+  let usedFallback = false;
+
+  if (provider === 'minimax') {
+    result = await callMinimaxApi(userText);
+    
+    if (!validateJson(result) && fallbackProvider === 'doubao') {
+      console.log('[AI ANALYZE] Minimax failed, falling back to Doubao');
+      usedFallback = true;
+      result = await callDoubaoApi(userText);
+    }
+  } else {
+    result = await callDoubaoApi(userText);
+  }
+
+  console.log('[AI ANALYZE] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validateJson(result));
+  
+  return { result, usedFallback, provider };
 }
 
 export default async function handler(req, res) {
@@ -250,19 +381,23 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'userText is required and must be a non-empty string' });
   }
 
-  console.log('[DOUBAO] analyze-worry handler called with userText length:', userText.length);
+  console.log('[AI ANALYZE] handler called with userText length:', userText.length);
 
-  let result = await callDoubaoApi(userText);
+  const { result, usedFallback, provider } = await callAIAnalyzeWithFallback(userText);
 
   if (!validateJson(result)) {
-    console.warn('[DOUBAO] First attempt returned invalid JSON, retrying once');
-    result = await callDoubaoApi(userText);
+    console.warn('[AI ANALYZE] First attempt returned invalid JSON, retrying once');
+    const retryResult = await callAIAnalyzeWithFallback(userText);
+    if (validateJson(retryResult.result)) {
+      Object.assign(result, retryResult.result);
+    }
   }
 
   if (!validateJson(result)) {
-    console.warn('[DOUBAO] Retry also failed, using fallback');
-    result = FALLBACK_RESPONSE;
+    console.warn('[AI ANALYZE] Retry also failed, using fallback');
+    Object.assign(result, FALLBACK_RESPONSE);
   }
 
+  console.log('[AI ANALYZE] Final response - provider:', provider, '| usedFallback:', usedFallback);
   res.status(200).json(result);
 }
