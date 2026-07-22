@@ -28,6 +28,13 @@ body {
   position: relative;
 }
 
+.auth-form {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+}
+
 .auth-input {
   position: absolute;
   background: transparent;
@@ -36,6 +43,12 @@ body {
   color: #fff;
   font-size: 16px;
   padding: 0 12px;
+  z-index: 20;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
 .auth-input:focus {
@@ -54,6 +67,12 @@ body {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: transform 0.1s ease;
+  z-index: 20;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
 .auth-button:active {
@@ -255,14 +274,16 @@ body {
 </head>
 <body>
 <div id="phone-canvas">
-  <input type="text" id="username-input" class="auth-input" placeholder="昵称">
-  <div id="username-error" class="validation-error"></div>
-  
-  <input type="password" id="password-input" class="auth-input" placeholder="密码">
-  <div id="password-error" class="validation-error"></div>
-  
-  <button id="login-button" class="auth-button"></button>
-  <button id="register-button" class="auth-button"></button>
+  <form id="auth-form" class="auth-form">
+    <input type="text" id="username-input" class="auth-input" placeholder="昵称" autocomplete="username">
+    <div id="username-error" class="validation-error"></div>
+    
+    <input type="password" id="password-input" class="auth-input" placeholder="密码" autocomplete="current-password">
+    <div id="password-error" class="validation-error"></div>
+    
+    <button type="button" id="login-button" class="auth-button"></button>
+    <button type="button" id="register-button" class="auth-button"></button>
+  </form>
   <div id="auth-message"></div>
 </div>
 

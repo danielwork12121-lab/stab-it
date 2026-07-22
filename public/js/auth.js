@@ -2,6 +2,7 @@ const usernameInput = document.getElementById('username-input');
 const passwordInput = document.getElementById('password-input');
 const loginButton = document.getElementById('login-button');
 const registerButton = document.getElementById('register-button');
+const authForm = document.getElementById('auth-form');
 const usernameError = document.getElementById('username-error');
 const passwordError = document.getElementById('password-error');
 const authMessage = document.getElementById('auth-message');
@@ -70,6 +71,8 @@ function handleLogin() {
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
   
+  if (DEV_MODE) console.log('[AUTH DEBUG] login button tapped');
+  
   console.log("login clicked", username, password);
   console.log("saved users", UserStorage.getUsers());
   
@@ -95,6 +98,10 @@ function handleLogin() {
   
   if (matchedUser && matchedUser.password === password) {
     UserStorage.setCurrentUser(username);
+    if (DEV_MODE) {
+      console.log('[AUTH DEBUG] user saved:', username);
+      console.log('[AUTH DEBUG] showHome called');
+    }
     showAuthMessage('登录成功，正在进入忧忧…');
     setTimeout(() => {
       showHomeScreen();
@@ -109,6 +116,8 @@ function handleRegister() {
   
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
+  
+  if (DEV_MODE) console.log('[AUTH DEBUG] register button tapped');
   
   console.log("register clicked", username, password);
   
@@ -135,6 +144,7 @@ function handleRegister() {
   }
   
   UserStorage.createNewUser(username, password);
+  if (DEV_MODE) console.log('[AUTH DEBUG] user saved:', username);
   console.log("saved users", UserStorage.getUsers());
   showAuthMessage('注册成功，请点击登录进入');
   
@@ -145,13 +155,33 @@ function handleRegister() {
 
 function addButtonPressFeedback(button) {
   button.addEventListener('mousedown', () => button.classList.add('button-pressed'));
-  button.addEventListener('touchstart', (e) => {
-    e.preventDefault();
+  button.addEventListener('touchstart', () => {
     button.classList.add('button-pressed');
-  });
+  }, { passive: true });
   button.addEventListener('mouseup', () => button.classList.remove('button-pressed'));
   button.addEventListener('mouseleave', () => button.classList.remove('button-pressed'));
   button.addEventListener('touchend', () => button.classList.remove('button-pressed'));
+}
+
+function handleAuthFormSubmit(e) {
+  e.preventDefault();
+  if (DEV_MODE) console.log('[AUTH DEBUG] form submit');
+  if (isRegisterMode) {
+    handleRegister();
+  } else {
+    handleLogin();
+  }
+}
+
+function handleEnterKey(e) {
+  if (e.key === 'Enter' || e.keyCode === 13) {
+    if (DEV_MODE) console.log('[AUTH DEBUG] enter key pressed');
+    if (isRegisterMode) {
+      handleRegister();
+    } else {
+      handleLogin();
+    }
+  }
 }
 
 function initAuth() {
@@ -163,4 +193,11 @@ function initAuth() {
   
   usernameInput.addEventListener('input', clearErrors);
   passwordInput.addEventListener('input', clearErrors);
+  
+  usernameInput.addEventListener('keydown', handleEnterKey);
+  passwordInput.addEventListener('keydown', handleEnterKey);
+  
+  if (authForm) {
+    authForm.addEventListener('submit', handleAuthFormSubmit);
+  }
 }
