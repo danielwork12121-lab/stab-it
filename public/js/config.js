@@ -32,7 +32,7 @@ const ASSETS = {
 };
 
 const HOME_DAY_BADGE_POSITION = {
-  left: '24.5%',
+  left: '20.5%',
   top: '10.4%'
 };
 
@@ -40,6 +40,8 @@ const CHAT_DAY_BADGE_POSITION = {
   left: '21%',
   top: '6.4%'
 };
+
+const DAY_BADGE_Y_OFFSET = 1.5;
 
 const PIN_STUCK_SIZE = '15%';
 const PIN_STUCK_OFFSET_X = 1.5;

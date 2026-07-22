@@ -1,3 +1,5 @@
+const REVIEW_UNPIN_BUTTON_LEFT = '87%';
+const REVIEW_UNPIN_BUTTON_TOP = '4.2%';
 const MOCK_REPLIES = [
   "我在呢，慢慢说。",
   "听起来这件事真的让你很难受。",
@@ -581,6 +583,38 @@ function injectChatStyles() {
         transform: translateX(-50%) translateY(0) scale(1);
       }
     }
+    
+    .persistent-unpin-btn {
+      position: absolute;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: white;
+      background: linear-gradient(135deg, rgba(240, 147, 251, 0.9) 0%, rgba(245, 87, 108, 0.9) 100%);
+      border: none;
+      border-radius: 20px;
+      box-shadow: 0 3px 12px rgba(245, 87, 108, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+      cursor: pointer;
+      z-index: 70;
+      opacity: 0;
+      transition: opacity 300ms ease, transform 300ms ease, box-shadow 200ms ease;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    
+    .persistent-unpin-btn.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    
+    .persistent-unpin-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 16px rgba(245, 87, 108, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.25) inset;
+    }
+    
+    .persistent-unpin-btn:active {
+      transform: scale(0.96);
+    }
   `;
   document.head.appendChild(style);
 }
@@ -646,6 +680,68 @@ function showReleaseCelebrationText() {
   homeScreen.appendChild(textEl);
 }
 window.showReleaseCelebrationText = showReleaseCelebrationText;
+
+function showPersistentUnpinButton() {
+  const existingBtn = chatScreen.querySelector('.persistent-unpin-btn');
+  if (existingBtn) {
+    existingBtn.parentNode.removeChild(existingBtn);
+  }
+  
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.reviewingPinId) {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] showPersistentUnpinButton - no reviewingPinId');
+    return;
+  }
+  
+  const pinId = currentUser.reviewingPinId;
+  const pinElement = chatScreen.querySelector(`.pin-stuck[data-pin-id="${pinId}"]`);
+  
+  if (!pinElement) {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] showPersistentUnpinButton - pin element not found');
+    return;
+  }
+  
+  const btn = document.createElement('button');
+  btn.className = 'persistent-unpin-btn';
+  btn.textContent = '聊开了\n取下这根针';
+  
+  btn.addEventListener('click', () => {
+    if (DEV_MODE) {
+      console.log('[REVIEW DEBUG] persistent unpin clicked, direct celebration');
+      console.log('[REVIEW DEBUG] removed intermediate post-removal celebration button');
+    }
+    removeReviewedNeedleWithAnimation();
+  });
+  
+  chatScreen.appendChild(btn);
+  
+  const updateButtonPosition = () => {
+  btn.style.left = REVIEW_UNPIN_BUTTON_LEFT;
+  btn.style.top = REVIEW_UNPIN_BUTTON_TOP;
+  btn.style.transform = 'translate(-50%, -50%)';
+};
+  
+  setTimeout(() => {
+    updateButtonPosition();
+    btn.classList.add('show');
+  }, 300);
+  
+  if (DEV_MODE) console.log('[REVIEW DEBUG] persistent unpin button created near needle');
+}
+window.showPersistentUnpinButton = showPersistentUnpinButton;
+
+function hidePersistentUnpinButton() {
+  const existingBtn = chatScreen.querySelector('.persistent-unpin-btn');
+  if (existingBtn) {
+    existingBtn.classList.remove('show');
+    setTimeout(() => {
+      if (existingBtn.parentNode) {
+        existingBtn.parentNode.removeChild(existingBtn);
+      }
+    }, 300);
+  }
+}
+window.hidePersistentUnpinButton = hidePersistentUnpinButton;
 
 let chatPanel = null;
 let chatLog = null;
@@ -812,6 +908,13 @@ async function sendMessage() {
       if (DEV_MODE) {
         console.log('[SEND MESSAGE DEBUG] reviewStage changed from awaiting_user_reason to followup_response');
       }
+    } else if (currentUser.reviewStage === 'initial_review_analysis') {
+      currentUser.reviewStage = 'review_conversation';
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+      if (DEV_MODE) {
+        console.log('[REVIEW DEBUG] user replied, entering review_conversation');
+      }
     }
   }
 
@@ -846,6 +949,7 @@ async function sendMessage() {
       
       if (needsBackgroundAnalysis) {
         if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Starting background analyze-worry - readyToPin=true but no analysis from chat');
+        if (DEV_MODE) console.log('[AI DEBUG] background analyze-worry started because no real analysis');
         
         const currentUser = getCurrentUser();
         if (currentUser) {
@@ -1171,6 +1275,7 @@ async function callAIChat(userText, options = {}) {
 
 function processChatAIResponse(aiResponse) {
   const mode = window.STABIT_CHAT_MODE;
+  const currentUser = getCurrentUser();
   
   if (DEV_MODE) {
     console.log('[AI RESPONSE DEBUG] =========================');
@@ -1180,12 +1285,15 @@ function processChatAIResponse(aiResponse) {
     console.log('[AI RESPONSE DEBUG] readyToRemove:', aiResponse.readyToRemove);
     console.log('[AI RESPONSE DEBUG] Has analysis:', !!aiResponse.analysis);
     console.log('[AI RESPONSE DEBUG] Mode:', mode);
+    console.log('[REVIEW DEBUG] current reviewStage before processing AI response:', currentUser?.reviewStage);
   }
   
   addMessage('bot', aiResponse.reply);
   saveMessage('bot', aiResponse.reply);
   
   if (aiResponse.analysis) {
+    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] chat analysis source: /api/ai/chat');
+    
     const currentUser = getCurrentUser();
     if (currentUser) {
       const chatPin = getCurrentChatPin();
@@ -1211,8 +1319,6 @@ function processChatAIResponse(aiResponse) {
     }
   }
   
-  const currentUser = getCurrentUser();
-  
   if (mode === 'pinning' && aiResponse.readyToPin) {
     if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToPin true, showing "交给忧忧" button');
     
@@ -1234,43 +1340,48 @@ function processChatAIResponse(aiResponse) {
     }, 300);
   }
   
-  if (mode === 'review' && aiResponse.readyToRemove) {
-    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToRemove true, showing "轻轻取下这根针" button');
+  if (mode === 'review' && currentUser) {
+    // Advance review stage after initial analysis response
+    if (currentUser.reviewStage === 'initial_review_analysis') {
+      currentUser.reviewStage = 'review_conversation';
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+      if (DEV_MODE) console.log('[REVIEW DEBUG] first diagnostic: suppressing buttons, advancing to review_conversation');
+    } else {
+      if (DEV_MODE) console.log('[REVIEW DEBUG] review_conversation: showing continue + X days buttons');
+    }
     
-    if (currentUser) {
+    if (aiResponse.readyToRemove) {
+      if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToRemove true, showing remove button');
+      
       currentUser.pendingAction = 'remove';
       currentUser.pendingReviewAction = null;
       UserStorage.updateUser(currentUser);
       UserStorage.setCurrentUser(currentUser.username);
-    }
+      
+      // Hide persistent unpin button and show dedicated remove button
+      hidePersistentUnpinButton();
+      setTimeout(() => {
+        addActionButton('轻轻取下这根针', () => {
+          if (currentUser) {
+            currentUser.pendingAction = null;
+            UserStorage.updateUser(currentUser);
+            UserStorage.setCurrentUser(currentUser.username);
+          }
+          removeReviewedNeedleWithAnimation();
+        });
+      }, 300);
+    } else if (aiResponse.review && aiResponse.review.nextReflectionDays) {
+      if (DEV_MODE) {
+        console.log('[AI RESPONSE DEBUG] =========================');
+        console.log('[AI RESPONSE DEBUG] readyToRemove false, showing review choice buttons');
+        console.log('[AI RESPONSE DEBUG] nextReflectionDays:', aiResponse.review.nextReflectionDays);
+        console.log('[AI RESPONSE DEBUG] reasonCategory:', aiResponse.review.reasonCategory);
+        console.log('[AI RESPONSE DEBUG] stillAffectsUser:', aiResponse.review.stillAffectsUser);
+        console.log('[AI RESPONSE DEBUG] reviewStage:', currentUser.reviewStage);
+        console.log('[REVIEW DEBUG] showing review choice buttons: 继续聊聊 +', aiResponse.review.nextReflectionDays, '天后再看看');
+      }
     
-    setTimeout(() => {
-      addActionButton('轻轻取下这根针', () => {
-        if (currentUser) {
-          currentUser.pendingAction = null;
-          currentUser.pendingReviewAction = null;
-          UserStorage.updateUser(currentUser);
-          UserStorage.setCurrentUser(currentUser.username);
-        }
-        removeReviewedNeedleWithAnimation();
-      });
-    }, 300);
-  }
-  
-  if (mode === 'review' && !aiResponse.readyToRemove && aiResponse.review && aiResponse.review.nextReflectionDays) {
-    const reviewStage = currentUser?.reviewStage;
-    
-    if (DEV_MODE) {
-      console.log('[AI RESPONSE DEBUG] =========================');
-      console.log('[AI RESPONSE DEBUG] readyToRemove false, showing review choice buttons');
-      console.log('[AI RESPONSE DEBUG] nextReflectionDays:', aiResponse.review.nextReflectionDays);
-      console.log('[AI RESPONSE DEBUG] reasonCategory:', aiResponse.review.reasonCategory);
-      console.log('[AI RESPONSE DEBUG] stillAffectsUser:', aiResponse.review.stillAffectsUser);
-      console.log('[AI RESPONSE DEBUG] reviewStage:', reviewStage);
-    }
-    
-    if (currentUser) {
-      currentUser.reviewStage = 'review_conversation';
       currentUser.pendingAction = 'review_reschedule';
       currentUser.pendingReviewAction = {
         pinId: window.reviewingPinId || currentUser.reviewingPinId,
@@ -1280,15 +1391,17 @@ function processChatAIResponse(aiResponse) {
       };
       UserStorage.updateUser(currentUser);
       UserStorage.setCurrentUser(currentUser.username);
+      
+      setTimeout(() => {
+        addReviewChoiceButtons(aiResponse.review.nextReflectionDays, aiResponse.review);
+      }, 300);
     }
-    
-    setTimeout(() => {
-      addReviewChoiceButtons(aiResponse.review.nextReflectionDays, aiResponse.review);
-    }, 300);
   }
 }
 
 function removeReviewedNeedleWithAnimation() {
+  hidePersistentUnpinButton();
+  
   const currentUser = getCurrentUser();
   if (!currentUser || !currentUser.painPins) {
     if (DEV_MODE) console.log('[PIN DEBUG] No user or painPins found');
@@ -1433,8 +1546,7 @@ function removeReviewedNeedleWithAnimation() {
           chatPanel.remove();
         }
 
-        showReleaseCelebrationButton(() => {
-          showHomeScreen();
+        showHomeScreen();
           if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
           setTimeout(() => {
             if (window.showReleaseConfettiOverlay) {
@@ -1444,7 +1556,6 @@ function removeReviewedNeedleWithAnimation() {
               window.showReleaseCelebrationText();
             }
           }, 300);
-        });
       }, 1250);
     } else {
       if (DEV_MODE) console.log('[PIN DEBUG] Matching DOM element not found, removing from storage only');
@@ -1511,7 +1622,7 @@ function showPostRemovalScreen(currentUser) {
       
       const existingBadge = chatScreen.querySelector('.day-badge');
       if (existingBadge) {
-        existingBadge.textContent = getCompanionDays();
+        existingBadge.textContent = '💗 陪伴第 ' + getCompanionDays() + ' 天';
       }
       
       if (DEV_MODE) {
@@ -1622,20 +1733,30 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
   existingButtons.forEach(btn => btn.remove());
   
+  hidePersistentUnpinButton();
+  
   if (DEV_MODE) {
     console.log('[CHAT DEBUG] addReviewChoiceButtons() - nextReflectionDays:', nextReflectionDays);
     console.log('[CHAT DEBUG] addReviewChoiceButtons() - reviewData:', reviewData);
   }
   
   const wrapper = document.createElement('div');
-  wrapper.className = 'chat-review-choice-wrapper';
+  wrapper.className = 'chat-review-choice-wrapper three-actions';
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] removed floating persistent unpin button');
+    console.log('[REVIEW DEBUG] showing three review actions: continue +', nextReflectionDays, '+ unpin');
+  }
   
   const continueBtn = document.createElement('button');
-  continueBtn.className = 'chat-action-button';
-  continueBtn.textContent = '继续聊聊';
+  continueBtn.className = 'chat-review-choice-button';
+  continueBtn.textContent = '继续聊';
   continueBtn.addEventListener('click', () => {
-    if (DEV_MODE) console.log('[CHAT DEBUG] "继续聊聊" clicked');
-    const existingButtons = chatLog.querySelectorAll('.chat-action-button');
+    if (DEV_MODE) {
+      console.log('[CHAT DEBUG] "继续聊" clicked');
+      console.log('[REVIEW DEBUG] continue chatting selected');
+    }
+    const existingButtons = chatLog.querySelectorAll('.chat-review-choice-button');
     existingButtons.forEach(btn => btn.remove());
     
     const currentUser = getCurrentUser();
@@ -1648,19 +1769,32 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   });
   
   const rescheduleBtn = document.createElement('button');
-  rescheduleBtn.className = 'chat-action-button';
-  rescheduleBtn.textContent = `${nextReflectionDays}天后再看看`;
+  rescheduleBtn.className = 'chat-review-choice-button';
+  rescheduleBtn.textContent = `${nextReflectionDays}天后看`;
   rescheduleBtn.addEventListener('click', () => {
+    if (DEV_MODE) console.log('[REVIEW DEBUG] reschedule selected:', nextReflectionDays, 'days');
     rescheduleReview(nextReflectionDays, reviewData);
+  });
+  
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'chat-review-choice-button release';
+  removeBtn.textContent = '取下针';
+  removeBtn.addEventListener('click', () => {
+    if (DEV_MODE) {
+      console.log('[CHAT DEBUG] "取下针" clicked');
+      console.log('[REVIEW DEBUG] inline unpin clicked');
+    }
+    removeReviewedNeedleWithAnimation();
   });
   
   wrapper.appendChild(continueBtn);
   wrapper.appendChild(rescheduleBtn);
+  wrapper.appendChild(removeBtn);
   
   chatLog.appendChild(wrapper);
   scrollToBottom();
   
-  if (DEV_MODE) console.log('[CHAT DEBUG] styled review action buttons rendered');
+  if (DEV_MODE) console.log('[CHAT DEBUG] styled review action buttons rendered with three options');
 }
 window.addReviewChoiceButtons = addReviewChoiceButtons;
 
@@ -1668,7 +1802,10 @@ function rescheduleReview(nextReflectionDays, reviewData) {
   if (DEV_MODE) {
     console.log('[REVIEW LOOP DEBUG] =========================');
     console.log('[REVIEW LOOP DEBUG] reschedule clicked');
+    console.log('[REVIEW DEBUG] reschedule selected:', nextReflectionDays, 'days');
   }
+  
+  hidePersistentUnpinButton();
 
   const currentUser = getCurrentUser();
   if (!currentUser) {
@@ -2086,7 +2223,7 @@ function showSummaryPanel() {
       
       const existingBadge = chatScreen.querySelector('.day-badge');
       if (existingBadge) {
-        existingBadge.textContent = getCompanionDays();
+        existingBadge.textContent = '💗 陪伴第 ' + getCompanionDays() + ' 天';
       }
       
       if (DEV_MODE) {

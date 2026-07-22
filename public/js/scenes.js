@@ -8,13 +8,18 @@ function injectDayBadgeStyles() {
   style.textContent = `
     .day-badge {
       position: absolute;
-      color: rgba(255, 255, 255, 0.9);
-      font-size: 14px;
-      font-weight: 500;
+      color: rgba(255, 255, 255, 0.95);
+      font-size: 16px;
+      font-weight: 600;
       white-space: nowrap;
       pointer-events: none;
-      transform: none;
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      transform: translate(-50%, -50%);
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      background: linear-gradient(135deg, rgba(155, 89, 182, 0.85), rgba(102, 51, 153, 0.85));
+      padding: 6px 14px;
+      border-radius: 20px;
+      box-shadow: 0 3px 12px rgba(155, 89, 182, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
     }
     .pin-stuck {
       position: absolute;
@@ -175,25 +180,25 @@ function showReviewPanel() {
   
   const enterReviewBtn = document.createElement('button');
   enterReviewBtn.className = 'summary-btn';
-  enterReviewBtn.textContent = '会，它还会影响我';
+  enterReviewBtn.textContent = '仍然影响我';
   enterReviewBtn.addEventListener('click', () => {
-    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 1 clicked: "会，它还会影响我"');
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 1 clicked: "仍然影响我"');
     enterReviewChat(oldestNeedle.id, '会，它还会影响我。');
   });
   
   const partialReviewBtn = document.createElement('button');
   partialReviewBtn.className = 'summary-btn';
-  partialReviewBtn.textContent = '有一点儿，但是没当时那么难受了';
+  partialReviewBtn.textContent = '有些影响';
   partialReviewBtn.addEventListener('click', () => {
-    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 2 clicked: "有一点儿，但是没当时那么难受了"');
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 2 clicked: "有些影响"');
     enterReviewChat(oldestNeedle.id, '有一点儿，但是没当时那么难受了。');
   });
   
   const readyToRemoveBtn = document.createElement('button');
-  readyToRemoveBtn.className = 'summary-btn';
-  readyToRemoveBtn.textContent = '不会了，好像已经忘记这件事儿了';
+  readyToRemoveBtn.className = 'summary-btn release';
+  readyToRemoveBtn.textContent = '已经放下';
   readyToRemoveBtn.addEventListener('click', () => {
-    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 3 clicked: "不会了，好像已经忘记这件事儿了"');
+    if (DEV_MODE) console.log('[REVIEW DEBUG] Button 3 clicked: "已经放下"');
     directRemoveNeedle(oldestNeedle.id);
   });
   
@@ -219,6 +224,8 @@ function enterReviewChat(pinId, contextMessage) {
   window.reviewingPinId = pinId;
   
   const currentUser = getCurrentUser();
+  const shouldSendAutoMessage = !currentUser?.reviewingPinId || currentUser.reviewingPinId !== pinId;
+  
   if (currentUser) {
     currentUser.reviewingPinId = pinId;
     currentUser.reviewStage = 'initial_review_analysis';
@@ -235,35 +242,34 @@ function enterReviewChat(pinId, contextMessage) {
   }
   
   window.STABIT_CHAT_MODE = 'review';
-  
-  if (DEV_MODE) {
-    console.log('[REVIEW DEBUG] STABIT_MODE before clearing:', window.STABIT_MODE);
-  }
   window.STABIT_MODE = null;
-  
-  if (DEV_MODE) {
-    console.log('[REVIEW DEBUG] STABIT_MODE after clearing:', window.STABIT_MODE);
-  }
   
   restoreChatPanel();
   
-  if (window.addMessage) {
-    window.addMessage('system', '—— 回看这根针 ——');
-  }
-  
-  if (DEV_MODE) {
-    console.log('[REVIEW DEBUG] Auto-calling AI after pre-review choice');
-    console.log('[REVIEW DEBUG] reviewStage:', currentUser?.reviewStage);
-    console.log('[REVIEW DEBUG] pendingReviewChoice:', contextMessage);
-  }
-  
-  setTimeout(() => {
-    if (window.sendAutoReviewMessage) {
-      window.sendAutoReviewMessage(contextMessage);
-    } else {
-      if (DEV_MODE) console.error('[REVIEW DEBUG] ERROR: window.sendAutoReviewMessage does not exist');
+  if (shouldSendAutoMessage) {
+    if (window.addMessage) {
+      window.addMessage('system', '—— 回看这根针 ——');
     }
-  }, 600);
+    
+    if (DEV_MODE) {
+      console.log('[REVIEW DEBUG] Auto-calling AI after pre-review choice');
+      console.log('[REVIEW DEBUG] reviewStage:', currentUser?.reviewStage);
+      console.log('[REVIEW DEBUG] pendingReviewChoice:', contextMessage);
+    }
+    
+    setTimeout(() => {
+      if (window.sendAutoReviewMessage) {
+        window.sendAutoReviewMessage(contextMessage);
+      } else {
+        if (DEV_MODE) console.error('[REVIEW DEBUG] ERROR: window.sendAutoReviewMessage does not exist');
+      }
+    }, 600);
+  } else {
+    if (DEV_MODE) {
+      console.log('[REVIEW DEBUG] Skipping auto review message - already reviewing this pin');
+    }
+  }
+  
 }
 
 function directRemoveNeedle(pinId) {
@@ -393,8 +399,7 @@ function directRemoveNeedle(pinId) {
         const freshUser = getCurrentUser();
         archiveAndRemovePin(freshUser);
         
-        showReleaseCelebrationButton(() => {
-          showHomeScreen();
+        showHomeScreen();
           if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
           setTimeout(() => {
             if (window.showReleaseConfettiOverlay) {
@@ -404,7 +409,6 @@ function directRemoveNeedle(pinId) {
               window.showReleaseCelebrationText();
             }
           }, 300);
-        });
       }, 1250);
     } else {
       if (DEV_MODE) console.log('[REVIEW DEBUG] No DOM needle found, removing from storage only');
@@ -428,7 +432,9 @@ function directRemoveNeedle(pinId) {
 }
 
 function createDayBadge(parent, position) {
-  console.log("createDayBadge called:", parent.id);
+  if (DEV_MODE) {
+    console.log("[DAY BADGE DEBUG] createDayBadge called:", parent.id);
+  }
 
   const existingBadge = parent.querySelector('.day-badge');
   if (existingBadge) {
@@ -438,17 +444,21 @@ function createDayBadge(parent, position) {
   const badge = document.createElement('div');
   badge.className = 'day-badge';
 
-  badge.textContent = getCompanionDays();
+  const days = getCompanionDays();
+  badge.textContent = '💗 陪伴第 ' + days + ' 天';
 
   badge.style.left = position.left;
-  badge.style.top = position.top;
-
-  // DEBUG STYLE
-  badge.style.position = "absolute";
+  
+  const baseTop = parseFloat(position.top);
+  const adjustedTop = baseTop + (DAY_BADGE_Y_OFFSET || 0);
+  badge.style.top = adjustedTop + '%';
 
   parent.appendChild(badge);
 
-  console.log("Badge appended.");
+  if (DEV_MODE) {
+    console.log("[DAY BADGE DEBUG] rendered companion badge: 💗 陪伴第 " + days + " 天");
+    console.log("[DAY BADGE DEBUG] extraY: " + (DAY_BADGE_Y_OFFSET || 0));
+  }
 }
 
 injectDayBadgeStyles();
@@ -490,6 +500,7 @@ function showHomeScreen() {
   homeScreen.querySelectorAll('.body-zone-outline').forEach(o => o.remove());
   homeScreen.querySelectorAll('.body-zone-label').forEach(l => l.remove());
   homeScreen.querySelectorAll('.pin-stuck').forEach(p => p.remove());
+  homeScreen.querySelectorAll('.day-badge').forEach(b => b.remove());
 
   loadSavedPainDots();
   createDayBadge(homeScreen, HOME_DAY_BADGE_POSITION);
