@@ -1,5 +1,5 @@
 const DEFAULT_API_URL = 'https://ark.cn-beijing.volces.com/api/v3/responses';
-const DOUBAO_TIMEOUT_MS = 12000;
+const DOUBAO_TIMEOUT_MS = 30000;
 
 const FALLBACK_RESPONSE = {
   safe: true,
@@ -59,18 +59,84 @@ coreIssue 规则：
 2. 少于18个中文字符。
 3. 说出情绪卡住的具体点。`;
 
-function validateJson(response) {
-  if (!response || typeof response !== 'object') return false;
-  if (typeof response.safe !== 'boolean') return false;
-  if (typeof response.coreIssue !== 'string') return false;
-  if (typeof response.reflectionDays !== 'number') return false;
-  if (typeof response.warmExplanation !== 'string') return false;
-  if (!Array.isArray(response.currentGuides)) return false;
-  if (response.currentGuides.length !== 3) return false;
-  for (const guide of response.currentGuides) {
-    if (typeof guide !== 'string') return false;
+function normalizeAnalysisResponse(parsed) {
+  if (!parsed || typeof parsed !== 'object') return parsed;
+
+  const normalized = { ...parsed };
+
+  // Ensure safe is boolean
+  if (typeof normalized.safe !== 'boolean') {
+    normalized.safe = String(normalized.safe).toLowerCase() === 'true';
   }
-  return true;
+
+  // Ensure coreIssue is a trimmed string
+  if (typeof normalized.coreIssue !== 'string') {
+    normalized.coreIssue = String(normalized.coreIssue || '');
+  }
+  normalized.coreIssue = normalized.coreIssue.trim();
+
+  // Convert reflectionDays to number if it's a string
+  if (normalized.reflectionDays !== null && normalized.reflectionDays !== undefined) {
+    const parsedDays = parseInt(normalized.reflectionDays, 10);
+    normalized.reflectionDays = isNaN(parsedDays) ? 5 : parsedDays;
+  }
+
+  // Ensure warmExplanation is a trimmed string
+  if (typeof normalized.warmExplanation !== 'string') {
+    normalized.warmExplanation = String(normalized.warmExplanation || '');
+  }
+  normalized.warmExplanation = normalized.warmExplanation.trim();
+
+  // Ensure currentGuides is an array of 3 strings
+  if (!Array.isArray(normalized.currentGuides)) {
+    normalized.currentGuides = ['', '', ''];
+  } else {
+    normalized.currentGuides = normalized.currentGuides.slice(0, 3);
+    while (normalized.currentGuides.length < 3) {
+      normalized.currentGuides.push('');
+    }
+    normalized.currentGuides = normalized.currentGuides.map(g => String(g || '').trim());
+  }
+
+  return normalized;
+}
+
+function validateJson(response) {
+  if (!response || typeof response !== 'object') {
+    return { valid: false, error: 'response is not an object' };
+  }
+  
+  if (typeof response.safe !== 'boolean') {
+    return { valid: false, error: `safe is not a boolean (type: ${typeof response.safe}, value: ${response.safe})` };
+  }
+  
+  if (typeof response.coreIssue !== 'string' || !response.coreIssue.trim()) {
+    return { valid: false, error: `coreIssue is not a valid string (type: ${typeof response.coreIssue}, value: "${String(response.coreIssue || '').substring(0, 50)}")` };
+  }
+  
+  if (typeof response.reflectionDays !== 'number' || isNaN(response.reflectionDays) || response.reflectionDays < 1 || response.reflectionDays > 365) {
+    return { valid: false, error: `reflectionDays is not a valid number (type: ${typeof response.reflectionDays}, value: ${response.reflectionDays})` };
+  }
+  
+  if (typeof response.warmExplanation !== 'string') {
+    return { valid: false, error: `warmExplanation is not a string (type: ${typeof response.warmExplanation})` };
+  }
+  
+  if (!Array.isArray(response.currentGuides)) {
+    return { valid: false, error: `currentGuides is not an array (type: ${typeof response.currentGuides})` };
+  }
+  
+  if (response.currentGuides.length !== 3) {
+    return { valid: false, error: `currentGuides length is not 3 (length: ${response.currentGuides.length})` };
+  }
+  
+  for (let i = 0; i < response.currentGuides.length; i++) {
+    if (typeof response.currentGuides[i] !== 'string') {
+      return { valid: false, error: `currentGuides[${i}] is not a string (type: ${typeof response.currentGuides[i]})` };
+    }
+  }
+  
+  return { valid: true };
 }
 
 function extractResponsesOutputText(data) {
@@ -124,10 +190,15 @@ function fallbackWithReason(reason) {
 }
 
 function parseAndValidateAnalysis(content) {
-  if (!content) return null;
+  if (!content) {
+    console.warn('[AI ANALYZE] parseAndValidateAnalysis - content is empty/null');
+    return null;
+  }
   
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    console.warn('[AI ANALYZE] parseAndValidateAnalysis - no JSON object found in content');
+    console.warn('[AI ANALYZE] parseAndValidateAnalysis - first 200 chars:', content.substring(0, 200));
     return null;
   }
 
@@ -135,13 +206,22 @@ function parseAndValidateAnalysis(content) {
   try {
     parsed = JSON.parse(jsonMatch[0]);
   } catch (e) {
+    console.warn('[AI ANALYZE] parseAndValidateAnalysis - JSON parse error:', e.message);
+    console.warn('[AI ANALYZE] parseAndValidateAnalysis - matched string:', jsonMatch[0].substring(0, 200));
     return null;
   }
 
-  if (validateJson(parsed)) {
+  // Add normalization step before validation
+  const normalized = normalizeAnalysisResponse(parsed);
+
+  const validationResult = validateJson(normalized);
+  if (validationResult.valid) {
     console.log('[AI ANALYZE] JSON validated successfully');
-    return parsed;
+    return normalized;
   }
+
+  console.warn('[AI ANALYZE] parseAndValidateAnalysis - validation failed:', validationResult.error);
+  console.warn('[AI ANALYZE] parseAndValidateAnalysis - normalized response:', JSON.stringify(normalized).substring(0, 500));
 
   return null;
 }
@@ -356,7 +436,7 @@ async function callAIAnalyzeWithFallback(userText) {
   if (provider === 'minimax') {
     result = await callMinimaxApi(userText);
     
-    if (!validateJson(result) && fallbackProvider === 'doubao') {
+    if (!validateJson(result).valid && fallbackProvider === 'doubao') {
       console.log('[AI ANALYZE] Minimax failed, falling back to Doubao');
       usedFallback = true;
       result = await callDoubaoApi(userText);
@@ -365,7 +445,11 @@ async function callAIAnalyzeWithFallback(userText) {
     result = await callDoubaoApi(userText);
   }
 
-  console.log('[AI ANALYZE] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validateJson(result));
+  const validationResult = validateJson(result);
+  console.log('[AI ANALYZE] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validationResult.valid);
+  if (!validationResult.valid) {
+    console.warn('[AI ANALYZE] Response validation error:', validationResult.error);
+  }
   
   return { result, usedFallback, provider };
 }
@@ -385,15 +469,15 @@ export default async function handler(req, res) {
 
   const { result, usedFallback, provider } = await callAIAnalyzeWithFallback(userText);
 
-  if (!validateJson(result)) {
+  if (!validateJson(result).valid) {
     console.warn('[AI ANALYZE] First attempt returned invalid JSON, retrying once');
     const retryResult = await callAIAnalyzeWithFallback(userText);
-    if (validateJson(retryResult.result)) {
+    if (validateJson(retryResult.result).valid) {
       Object.assign(result, retryResult.result);
     }
   }
 
-  if (!validateJson(result)) {
+  if (!validateJson(result).valid) {
     console.warn('[AI ANALYZE] Retry also failed, using fallback');
     Object.assign(result, FALLBACK_RESPONSE);
   }

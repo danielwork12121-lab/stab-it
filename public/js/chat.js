@@ -822,14 +822,30 @@ async function sendMessage() {
   try {
     if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Calling /api/ai/chat first with mode:', mode);
     
-    await callAIChat(text, { loadingMsg });
+    const chatResponse = await callAIChat(text, { loadingMsg });
     
     if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] /api/ai/chat completed, visible reply shown');
     
     if (mode === 'pinning') {
       const freshPin = getCurrentChatPin();
-      if (freshPin && !freshPin.aiAnalyzed && !freshPin.aiAnalyzing) {
-        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Starting background analyze-worry');
+      
+      if (DEV_MODE) {
+        console.log('[SEND MESSAGE DEBUG] Chat response readyToPin:', chatResponse?.readyToPin);
+        console.log('[SEND MESSAGE DEBUG] Chat response has analysis:', !!chatResponse?.analysis);
+        console.log('[SEND MESSAGE DEBUG] Pin aiAnalyzed:', freshPin?.aiAnalyzed);
+        console.log('[SEND MESSAGE DEBUG] Pin aiAnalyzing:', freshPin?.aiAnalyzing);
+      }
+      
+      const needsBackgroundAnalysis = 
+        chatResponse && 
+        chatResponse.readyToPin && 
+        !chatResponse.analysis && 
+        freshPin && 
+        !freshPin.aiAnalyzed && 
+        !freshPin.aiAnalyzing;
+      
+      if (needsBackgroundAnalysis) {
+        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Starting background analyze-worry - readyToPin=true but no analysis from chat');
         
         const currentUser = getCurrentUser();
         if (currentUser) {
@@ -844,8 +860,16 @@ async function sendMessage() {
         analyzeWorryWithAI(text).catch(err => {
           if (DEV_MODE) console.warn('[AI DEBUG] Background analyze-worry failed:', err);
         });
-      } else if (DEV_MODE && freshPin && freshPin.aiAnalyzed) {
-        console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already saved from chat response');
+      } else if (DEV_MODE) {
+        if (chatResponse?.analysis) {
+          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already returned from /api/ai/chat');
+        } else if (!chatResponse?.readyToPin) {
+          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - readyToPin is false, conversation still ongoing');
+        } else if (freshPin?.aiAnalyzed) {
+          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already saved from chat response');
+        } else if (freshPin?.aiAnalyzing) {
+          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already in progress');
+        }
       }
     }
   } finally {
@@ -862,7 +886,7 @@ async function analyzeWorryWithAI(userText) {
     const timeoutId = setTimeout(() => {
       if (DEV_MODE) console.warn('[AI DEBUG] analyze-worry fetch timed out');
       controller.abort();
-    }, 15000);
+    }, 30000);
     
     const response = await fetch('/api/ai/analyze-worry', {
       method: 'POST',
@@ -1024,9 +1048,13 @@ async function callAIChat(userText, options = {}) {
   try {
     if (DEV_MODE) console.log('[AI CHAT DEBUG] Fetching:', '/api/ai/chat');
     console.log('[AI CHAT DEBUG] Request body length:', JSON.stringify(requestBody).length);
+    console.log('[AI CHAT DEBUG] Timeout:', AI_CHAT_TIMEOUT_MS, 'ms');
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), AI_CHAT_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => {
+      if (DEV_MODE) console.warn('[AI CHAT DEBUG] Frontend timeout triggered after', AI_CHAT_TIMEOUT_MS, 'ms');
+      controller.abort();
+    }, AI_CHAT_TIMEOUT_MS);
     
     const response = await fetch('/api/ai/chat', {
       method: 'POST',
@@ -1089,14 +1117,16 @@ async function callAIChat(userText, options = {}) {
       return false;
     }
 
-    processChatAIResponse({
+    const processedResponse = {
       reply: aiResponse.reply,
       readyToPin: !!aiResponse.readyToPin,
       readyToRemove: !!aiResponse.readyToRemove,
       analysis: aiResponse.analysis,
       review: aiResponse.review
-    });
-    return true;
+    };
+    
+    processChatAIResponse(processedResponse);
+    return processedResponse;
     
   } catch (error) {
     const elapsedMs = Date.now() - startTime;

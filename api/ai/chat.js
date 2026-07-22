@@ -1,4 +1,6 @@
 const DEFAULT_API_URL = 'https://ark.cn-beijing.volces.com/api/v3/responses';
+const MINIMAX_TIMEOUT_MS = 30000;
+const DOUBAO_TIMEOUT_MS = 60000;
 
 const FALLBACK_RESPONSES = {
   pinning: {
@@ -493,36 +495,79 @@ const VALID_REASON_CATEGORIES = [
 ];
 
 function validateChatResponse(response) {
-  if (!response || typeof response !== 'object') return false;
-  if (typeof response.reply !== 'string') return false;
-  if (typeof response.readyToPin !== 'boolean') return false;
-  if (typeof response.readyToRemove !== 'boolean') return false;
+  if (!response || typeof response !== 'object') {
+    return { valid: false, error: 'response is not an object' };
+  }
+  
+  if (typeof response.reply !== 'string' || !response.reply.trim()) {
+    return { valid: false, error: `reply is not a valid string (type: ${typeof response.reply}, value: "${String(response.reply || '').substring(0, 50)}")` };
+  }
+  
+  if (typeof response.readyToPin !== 'boolean') {
+    return { valid: false, error: `readyToPin is not a boolean (type: ${typeof response.readyToPin}, value: ${response.readyToPin})` };
+  }
+  
+  if (typeof response.readyToRemove !== 'boolean') {
+    return { valid: false, error: `readyToRemove is not a boolean (type: ${typeof response.readyToRemove}, value: ${response.readyToRemove})` };
+  }
   
   if (response.analysis) {
     const analysis = response.analysis;
-    if (typeof analysis !== 'object') return false;
-    if (typeof analysis.coreIssue !== 'string') return false;
+    if (typeof analysis !== 'object') {
+      return { valid: false, error: `analysis is not an object (type: ${typeof analysis})` };
+    }
+    
+    if (typeof analysis.coreIssue !== 'string' || !analysis.coreIssue.trim()) {
+      return { valid: false, error: `analysis.coreIssue is not a valid string (type: ${typeof analysis.coreIssue}, value: "${String(analysis.coreIssue || '').substring(0, 50)}")` };
+    }
+    
     const reflectionDays = parseInt(analysis.reflectionDays);
-    if (isNaN(reflectionDays) || reflectionDays < 1 || reflectionDays > 365) return false;
-    if (typeof analysis.warmExplanation !== 'string') return false;
-    if (!Array.isArray(analysis.currentGuides) || analysis.currentGuides.length !== 3) return false;
-    for (const guide of analysis.currentGuides) {
-      if (typeof guide !== 'string') return false;
+    if (isNaN(reflectionDays) || reflectionDays < 1 || reflectionDays > 365) {
+      return { valid: false, error: `analysis.reflectionDays is not a valid number (type: ${typeof analysis.reflectionDays}, value: ${analysis.reflectionDays})` };
+    }
+    
+    if (typeof analysis.warmExplanation !== 'string') {
+      return { valid: false, error: `analysis.warmExplanation is not a string (type: ${typeof analysis.warmExplanation})` };
+    }
+    
+    if (!Array.isArray(analysis.currentGuides) || analysis.currentGuides.length !== 3) {
+      return { valid: false, error: `analysis.currentGuides is not an array of 3 elements (type: ${typeof analysis.currentGuides}, length: ${Array.isArray(analysis.currentGuides) ? analysis.currentGuides.length : 'N/A'})` };
+    }
+    
+    for (let i = 0; i < analysis.currentGuides.length; i++) {
+      if (typeof analysis.currentGuides[i] !== 'string') {
+        return { valid: false, error: `analysis.currentGuides[${i}] is not a string (type: ${typeof analysis.currentGuides[i]})` };
+      }
+    }
+    
+    if (typeof analysis.safe !== 'boolean') {
+      return { valid: false, error: `analysis.safe is not a boolean (type: ${typeof analysis.safe}, value: ${analysis.safe})` };
     }
   }
   
   if (response.review) {
     const review = response.review;
-    if (typeof review !== 'object') return false;
-    if (typeof review.stillAffectsUser !== 'boolean') return false;
-    if (typeof review.reasonCategory !== 'string' || !VALID_REASON_CATEGORIES.includes(review.reasonCategory)) return false;
+    if (typeof review !== 'object') {
+      return { valid: false, error: `review is not an object (type: ${typeof review})` };
+    }
+    
+    if (typeof review.stillAffectsUser !== 'boolean') {
+      return { valid: false, error: `review.stillAffectsUser is not a boolean (type: ${typeof review.stillAffectsUser}, value: ${review.stillAffectsUser})` };
+    }
+    
+    if (typeof review.reasonCategory !== 'string' || !VALID_REASON_CATEGORIES.includes(review.reasonCategory)) {
+      return { valid: false, error: `review.reasonCategory is invalid (value: "${review.reasonCategory}", valid options: ${VALID_REASON_CATEGORIES.join(', ')})` };
+    }
+    
     if (review.nextReflectionDays !== null) {
       const nextDays = parseInt(review.nextReflectionDays);
-      if (isNaN(nextDays) || nextDays < 1 || nextDays > 365) return false;
+      if (isNaN(nextDays) || nextDays < 1 || nextDays > 365) {
+        return { valid: false, error: `review.nextReflectionDays is not a valid number (type: ${typeof review.nextReflectionDays}, value: ${review.nextReflectionDays})` };
+      }
     }
   }
   
-  return true;
+  return { valid: true };
 }
 
 function extractResponsesOutputText(data) {
@@ -636,6 +681,13 @@ async function callDoubaoChat(mode, messages, pin) {
   try {
     console.log('[DOUBAO CHAT] Calling API with body length:', JSON.stringify(body).length);
     console.log('[DOUBAO CHAT] Request body keys:', Object.keys(body));
+    console.log('[DOUBAO CHAT] Timeout:', DOUBAO_TIMEOUT_MS, 'ms');
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.warn('[DOUBAO CHAT] Request timed out after', DOUBAO_TIMEOUT_MS, 'ms');
+      controller.abort();
+    }, DOUBAO_TIMEOUT_MS);
     
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -643,8 +695,11 @@ async function callDoubaoChat(mode, messages, pin) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
 
     console.log('[DOUBAO CHAT] Doubao response status:', response.status);
 
@@ -680,27 +735,283 @@ async function callDoubaoChat(mode, messages, pin) {
   }
 }
 
+function normalizeChatResponse(parsed) {
+  if (!parsed || typeof parsed !== 'object') return parsed;
+
+  const normalized = { ...parsed };
+
+  // Ensure reply is a string
+  if (typeof normalized.reply !== 'string') {
+    normalized.reply = String(normalized.reply || '');
+  }
+  normalized.reply = normalized.reply.trim();
+
+  // Ensure readyToPin is boolean
+  if (typeof normalized.readyToPin !== 'boolean') {
+    normalized.readyToPin = String(normalized.readyToPin).toLowerCase() === 'true';
+  }
+
+  // Ensure readyToRemove is boolean
+  if (typeof normalized.readyToRemove !== 'boolean') {
+    normalized.readyToRemove = String(normalized.readyToRemove).toLowerCase() === 'true';
+  }
+
+  // Normalize analysis object
+  if (normalized.analysis && typeof normalized.analysis === 'object') {
+    normalized.analysis = { ...normalized.analysis };
+    
+    if (typeof normalized.analysis.coreIssue !== 'string') {
+      normalized.analysis.coreIssue = String(normalized.analysis.coreIssue || '');
+    }
+    normalized.analysis.coreIssue = normalized.analysis.coreIssue.trim();
+
+    // Convert reflectionDays to number if it's a string
+    if (normalized.analysis.reflectionDays !== null && normalized.analysis.reflectionDays !== undefined) {
+      const parsedDays = parseInt(normalized.analysis.reflectionDays, 10);
+      normalized.analysis.reflectionDays = isNaN(parsedDays) ? 5 : parsedDays;
+    }
+
+    if (typeof normalized.analysis.warmExplanation !== 'string') {
+      normalized.analysis.warmExplanation = String(normalized.analysis.warmExplanation || '');
+    }
+    normalized.analysis.warmExplanation = normalized.analysis.warmExplanation.trim();
+
+    // Ensure currentGuides is an array of 3 strings
+    if (!Array.isArray(normalized.analysis.currentGuides)) {
+      normalized.analysis.currentGuides = ['', '', ''];
+    } else {
+      normalized.analysis.currentGuides = normalized.analysis.currentGuides.slice(0, 3);
+      while (normalized.analysis.currentGuides.length < 3) {
+        normalized.analysis.currentGuides.push('');
+      }
+      normalized.analysis.currentGuides = normalized.analysis.currentGuides.map(g => String(g || '').trim());
+    }
+
+    // Ensure safe is boolean
+    if (typeof normalized.analysis.safe !== 'boolean') {
+      normalized.analysis.safe = true;
+    }
+  }
+
+  // Normalize review object
+  if (normalized.review && typeof normalized.review === 'object') {
+    normalized.review = { ...normalized.review };
+
+    if (typeof normalized.review.stillAffectsUser !== 'boolean') {
+      normalized.review.stillAffectsUser = String(normalized.review.stillAffectsUser).toLowerCase() === 'true';
+    }
+
+    if (typeof normalized.review.reasonCategory !== 'string') {
+      normalized.review.reasonCategory = 'unclear';
+    }
+    normalized.review.reasonCategory = normalized.review.reasonCategory.trim();
+
+    // Convert nextReflectionDays to number if it's a string
+    if (normalized.review.nextReflectionDays !== null && normalized.review.nextReflectionDays !== undefined) {
+      const parsedDays = parseInt(normalized.review.nextReflectionDays, 10);
+      normalized.review.nextReflectionDays = isNaN(parsedDays) ? null : parsedDays;
+    }
+  }
+
+  return normalized;
+}
+
+function detectReadyToPinFromText(text) {
+  const lowerText = text.toLowerCase();
+  
+  const pinningKeywords = [
+    '交给忧忧',
+    '把这件事交给忧忧',
+    '交给忧忧保管',
+    '保存',
+    '收好',
+    '扎针',
+    '这一针',
+    '回看',
+    '回顾',
+    '如果觉得这个时间可以',
+    '如果你觉得这个时间可以',
+    '接受这个时间',
+    '准备好了就告诉我',
+    '你可以把这件事',
+    '准备好就把',
+    '帮你收好',
+    '帮你保存',
+    '天再回来看看',
+    '天后再看看',
+    '天后来看看'
+  ];
+  
+  for (const keyword of pinningKeywords) {
+    if (text.includes(keyword)) {
+      return true;
+    }
+  }
+  
+  const hasReflectionTime = lowerText.includes('天') && 
+    (lowerText.includes('后') || lowerText.includes('再') || lowerText.includes('回')) &&
+    !lowerText.includes('今天') && !lowerText.includes('明天');
+  
+  const hasConfirmationRequest = text.includes('可以') && 
+    (text.includes('吗') || text.includes('如果') || text.includes('就'));
+  
+  return hasReflectionTime && hasConfirmationRequest;
+}
+
+function detectReadyToRemoveFromText(text) {
+  const lowerText = text.toLowerCase();
+  
+  const removalKeywords = [
+    '放下',
+    '取下',
+    '拔掉',
+    '拔掉这根针',
+    '取下这根针',
+    '轻轻取下',
+    '已经过去了',
+    '不再影响',
+    '准备好了',
+    '可以放下',
+    '释然',
+    '没有之前那么刺',
+    '已经能带着更轻',
+    '已经不像之前那样',
+    '放下这根针',
+    '准备好取下',
+    '准备好放下',
+    '不用再回来了',
+    '不会再影响'
+  ];
+  
+  for (const keyword of removalKeywords) {
+    if (text.includes(keyword)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function extractReflectionDaysFromText(text) {
+  const dayPatterns = [
+    /(\d+)\s*天(后|再|回来|看看)/,
+    /(\d+)\s*(个)?(日|天)/,
+    /(三|五|七|十|十四|三十)\s*天/
+  ];
+  
+  const chineseNumMap = {
+    '三': 3,
+    '五': 5,
+    '七': 7,
+    '十': 10,
+    '十四': 14,
+    '三十': 30
+  };
+  
+  for (const pattern of dayPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const numStr = match[1];
+      if (chineseNumMap[numStr]) {
+        return chineseNumMap[numStr];
+      }
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num >= 1 && num <= 365) {
+        return num;
+      }
+    }
+  }
+  
+  return null;
+}
+
 function parseAndValidateResponse(content, mode) {
-  if (!content) return null;
+  if (!content) {
+    console.warn('[AI CHAT] parseAndValidateResponse - content is empty/null');
+    return null;
+  }
   
   const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return null;
+  
+  if (jsonMatch) {
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      console.warn('[AI CHAT] parseAndValidateResponse - JSON parse error:', e.message);
+      console.warn('[AI CHAT] parseAndValidateResponse - matched string:', jsonMatch[0].substring(0, 200));
+      return createPlainTextResponse(content, mode);
+    }
+
+    const normalized = normalizeChatResponse(parsed);
+
+    const validationResult = validateChatResponse(normalized);
+    if (validationResult.valid) {
+      console.log('[AI CHAT] JSON validated successfully');
+      return normalized;
+    }
+
+    console.warn('[AI CHAT] parseAndValidateResponse - validation failed:', validationResult.error);
+    console.warn('[AI CHAT] parseAndValidateResponse - normalized response:', JSON.stringify(normalized).substring(0, 500));
+    return createPlainTextResponse(content, mode);
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    return null;
-  }
+  console.warn('[AI CHAT] parseAndValidateResponse - no JSON object found in content, using plain-text heuristics');
+  console.warn('[AI CHAT] parseAndValidateResponse - first 200 chars:', content.substring(0, 200));
+  
+  return createPlainTextResponse(content, mode);
+}
 
-  if (validateChatResponse(parsed)) {
-    console.log('[AI CHAT] JSON validated successfully');
-    return parsed;
+function createPlainTextResponse(content, mode) {
+  const text = content.trim();
+  
+  const response = {
+    reply: text,
+    readyToPin: false,
+    readyToRemove: false,
+    debugFallback: false,
+    fallbackReason: null
+  };
+  
+  if (mode === 'pinning') {
+    response.readyToPin = detectReadyToPinFromText(text);
+    
+    if (response.readyToPin) {
+      const reflectionDays = extractReflectionDaysFromText(text) || 5;
+      response.analysis = {
+        safe: true,
+        coreIssue: '需要整理的情绪',
+        reflectionDays: reflectionDays,
+        warmExplanation: '忧忧会帮你收好这份烦恼',
+        currentGuides: ['先慢慢呼一口气', '把这件事写完整', '今晚先不用急着解决']
+      };
+    }
+    
+    console.log('[AI CHAT] Plain-text pinning response - readyToPin:', response.readyToPin);
+  } else if (mode === 'review') {
+    response.readyToRemove = detectReadyToRemoveFromText(text);
+    
+    if (response.readyToRemove) {
+      response.review = {
+        stillAffectsUser: false,
+        reasonCategory: 'ready_to_release',
+        nextReflectionDays: null
+      };
+    } else {
+      const reflectionDays = extractReflectionDaysFromText(text);
+      if (reflectionDays) {
+        response.review = {
+          stillAffectsUser: true,
+          reasonCategory: 'unclear',
+          nextReflectionDays: reflectionDays
+        };
+      }
+    }
+    
+    console.log('[AI CHAT] Plain-text review response - readyToRemove:', response.readyToRemove);
   }
-
-  return null;
+  
+  return response;
 }
 
 function buildMinimaxChatBody(modelId, mode, messages, pin) {
@@ -756,6 +1067,13 @@ async function callMinimaxChat(mode, messages, pin) {
 
   try {
     console.log('[MINIMAX CHAT] Calling API with body length:', JSON.stringify(body).length);
+    console.log('[MINIMAX CHAT] Timeout:', MINIMAX_TIMEOUT_MS, 'ms');
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.warn('[MINIMAX CHAT] Request timed out after', MINIMAX_TIMEOUT_MS, 'ms');
+      controller.abort();
+    }, MINIMAX_TIMEOUT_MS);
     
     const response = await fetch(`${apiUrl}/chat/completions`, {
       method: 'POST',
@@ -763,8 +1081,11 @@ async function callMinimaxChat(mode, messages, pin) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
 
     console.log('[MINIMAX CHAT] Minimax response status:', response.status);
 
@@ -810,20 +1131,40 @@ async function callAIChatWithFallback(mode, messages, pin) {
 
   let result;
   let usedFallback = false;
+  let retried = false;
 
   if (provider === 'minimax') {
     result = await callMinimaxChat(mode, messages, pin);
     
-    if (!validateChatResponse(result) && fallbackProvider === 'doubao') {
-      console.log('[AI CHAT] Minimax failed, falling back to Doubao');
-      usedFallback = true;
-      result = await callDoubaoChat(mode, messages, pin);
+    if (!validateChatResponse(result).valid) {
+      const isTimeoutError = result.fallbackReason && (
+        result.fallbackReason.includes('timeout') || 
+        result.fallbackReason.includes('AbortError') ||
+        result.fallbackReason.includes('ECONN') ||
+        result.fallbackReason.includes('Network')
+      );
+      
+      if (isTimeoutError && !retried) {
+        console.log('[AI CHAT] Minimax timeout/network error, retrying once');
+        retried = true;
+        result = await callMinimaxChat(mode, messages, pin);
+      }
+      
+      if (!validateChatResponse(result).valid && fallbackProvider === 'doubao') {
+        console.log('[AI CHAT] Minimax failed, falling back to Doubao');
+        usedFallback = true;
+        result = await callDoubaoChat(mode, messages, pin);
+      }
     }
   } else {
     result = await callDoubaoChat(mode, messages, pin);
   }
 
-  console.log('[AI CHAT] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validateChatResponse(result));
+  const validationResult = validateChatResponse(result);
+  console.log('[AI CHAT] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validationResult.valid);
+  if (!validationResult.valid) {
+    console.warn('[AI CHAT] Response validation error:', validationResult.error);
+  }
   
   return { result, usedFallback, provider };
 }
@@ -844,15 +1185,15 @@ export default async function handler(req, res) {
 
   const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin);
 
-  if (!validateChatResponse(result)) {
+  if (!validateChatResponse(result).valid) {
     console.warn('[AI CHAT] First attempt returned invalid response, retrying once');
     const retryResult = await callAIChatWithFallback(mode, messages, pin);
-    if (validateChatResponse(retryResult.result)) {
+    if (validateChatResponse(retryResult.result).valid) {
       Object.assign(result, retryResult.result);
     }
   }
 
-  if (!validateChatResponse(result)) {
+  if (!validateChatResponse(result).valid) {
     console.warn('[AI CHAT] Retry also failed, using fallback');
     Object.assign(result, fallbackResponseForReason(mode, 'retry_failed'));
   }
