@@ -506,6 +506,11 @@ function injectChatStyles() {
       pointer-events: none;
       opacity: 0;
       animation: releaseConfettiFall 2800ms ease-in-out forwards;
+      transition: opacity 800ms ease-out;
+    }
+    
+    .release-confetti-overlay.celebration-fading {
+      opacity: 0 !important;
     }
     
     @keyframes releaseConfettiFall {
@@ -517,13 +522,9 @@ function injectChatStyles() {
         opacity: 1;
         transform: translateY(-1%) translateX(-1px) scale(1.03);
       }
-      45% {
+      65% {
         opacity: 1;
         transform: translateY(2%) translateX(1px) scale(1.035);
-      }
-      75% {
-        opacity: 0.9;
-        transform: translateY(5%) translateX(-1px) scale(1.03);
       }
       100% {
         opacity: 0;
@@ -557,7 +558,12 @@ function injectChatStyles() {
       );
       border: 1px solid rgba(255, 220, 255, 0.22);
       backdrop-filter: blur(6px);
-      animation: releaseTextAppear 600ms ease-out forwards;
+      animation: releaseTextAppear 2800ms ease-in-out forwards;
+      transition: opacity 800ms ease-out;
+    }
+    
+    .release-celebration-text.celebration-fading {
+      opacity: 0 !important;
     }
     
     .release-celebration-text .release-title {
@@ -578,9 +584,17 @@ function injectChatStyles() {
         opacity: 0;
         transform: translateX(-50%) translateY(-12px) scale(0.96);
       }
-      100% {
+      15% {
         opacity: 1;
         transform: translateX(-50%) translateY(0) scale(1);
+      }
+      65% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(4px) scale(0.98);
       }
     }
     
@@ -656,11 +670,10 @@ function showReleaseConfettiOverlay() {
     AudioManager.playCelebrationSound();
   }
   
+  // Start coordinated fade after main animation (2000ms display + 800ms fade)
   setTimeout(() => {
-    if (confetti.parentNode) {
-      confetti.parentNode.removeChild(confetti);
-    }
-  }, 3000);
+    startCelebrationFade();
+  }, 2000);
 }
 window.showReleaseConfettiOverlay = showReleaseConfettiOverlay;
 
@@ -680,6 +693,36 @@ function showReleaseCelebrationText() {
   homeScreen.appendChild(textEl);
 }
 window.showReleaseCelebrationText = showReleaseCelebrationText;
+
+// Coordinated fade-out for confetti and celebration text
+function startCelebrationFade() {
+  if (DEV_MODE) console.log('[CELEBRATION DEBUG] coordinated fade started');
+  
+  const CONFETTI_FADE_DURATION = 800;
+  
+  const confetti = homeScreen.querySelector('.release-confetti-overlay');
+  const textEl = homeScreen.querySelector('.release-celebration-text');
+  
+  // Add fading class to both elements
+  if (confetti) {
+    confetti.classList.add('celebration-fading');
+  }
+  if (textEl) {
+    textEl.classList.add('celebration-fading');
+  }
+  
+  // Remove elements after fade completes
+  setTimeout(() => {
+    if (confetti && confetti.parentNode) {
+      confetti.parentNode.removeChild(confetti);
+      if (DEV_MODE) console.log('[CELEBRATION DEBUG] confetti removed');
+    }
+    if (textEl && textEl.parentNode) {
+      textEl.parentNode.removeChild(textEl);
+      if (DEV_MODE) console.log('[CELEBRATION DEBUG] celebration panel removed');
+    }
+  }, CONFETTI_FADE_DURATION);
+}
 
 function showPersistentUnpinButton() {
   const existingBtn = chatScreen.querySelector('.persistent-unpin-btn');
@@ -893,6 +936,12 @@ async function sendMessage() {
   saveMessage('user', text);
   
   chatInput.value = '';
+  
+  // Remove previous action buttons when sending a new message in review mode
+  if (mode === 'review') {
+    const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button, .chat-review-choice-wrapper');
+    existingButtons.forEach(btn => btn.remove());
+  }
   
   if (mode === 'review' && text.toLowerCase() === 'yes') {
     if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Special command: yes');
@@ -1342,16 +1391,18 @@ function processChatAIResponse(aiResponse) {
   
   if (mode === 'review' && currentUser) {
     // Advance review stage after initial analysis response
-    if (currentUser.reviewStage === 'initial_review_analysis') {
+    const wasInitialDiagnostic = currentUser.reviewStage === 'initial_review_analysis';
+    if (wasInitialDiagnostic) {
       currentUser.reviewStage = 'review_conversation';
       UserStorage.updateUser(currentUser);
       UserStorage.setCurrentUser(currentUser.username);
       if (DEV_MODE) console.log('[REVIEW DEBUG] first diagnostic: suppressing buttons, advancing to review_conversation');
-    } else {
-      if (DEV_MODE) console.log('[REVIEW DEBUG] review_conversation: showing continue + X days buttons');
     }
     
-    if (aiResponse.readyToRemove) {
+    if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] initial diagnostic complete:', !wasInitialDiagnostic);
+    
+    // Buttons should only show after the initial diagnostic (first user reply + AI response)
+    if (aiResponse.readyToRemove && !wasInitialDiagnostic) {
       if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToRemove true, showing remove button');
       
       currentUser.pendingAction = 'remove';
@@ -1371,30 +1422,46 @@ function processChatAIResponse(aiResponse) {
           removeReviewedNeedleWithAnimation();
         });
       }, 300);
-    } else if (aiResponse.review && aiResponse.review.nextReflectionDays) {
+    } else if (!wasInitialDiagnostic) {
+      // Always show review choice buttons after every AI reply once initial diagnostic is complete
+      const pin = getCurrentChatPin();
+      
+      // Check if pin is still active
+      const isPinActive = pin && currentUser.painPins.find(p => p.id === pin.id);
+      if (!isPinActive) {
+        if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] actions skipped: pin no longer active');
+        return;
+      }
+      
+      const nextReflectionDays = aiResponse.review?.nextReflectionDays || pin?.reflectionDays || 5;
+      const reviewData = aiResponse.review || {};
+      
       if (DEV_MODE) {
         console.log('[AI RESPONSE DEBUG] =========================');
-        console.log('[AI RESPONSE DEBUG] readyToRemove false, showing review choice buttons');
-        console.log('[AI RESPONSE DEBUG] nextReflectionDays:', aiResponse.review.nextReflectionDays);
-        console.log('[AI RESPONSE DEBUG] reasonCategory:', aiResponse.review.reasonCategory);
-        console.log('[AI RESPONSE DEBUG] stillAffectsUser:', aiResponse.review.stillAffectsUser);
+        console.log('[AI RESPONSE DEBUG] showing review choice buttons after every AI reply');
+        console.log('[AI RESPONSE DEBUG] nextReflectionDays:', nextReflectionDays, '(source:', aiResponse.review?.nextReflectionDays ? 'api' : pin?.reflectionDays ? 'pin' : 'default', ')');
         console.log('[AI RESPONSE DEBUG] reviewStage:', currentUser.reviewStage);
-        console.log('[REVIEW DEBUG] showing review choice buttons: 继续聊聊 +', aiResponse.review.nextReflectionDays, '天后再看看');
+        console.log('[REVIEW DEBUG] showing review choice buttons: 继续聊 +', nextReflectionDays, '天后看 + 取下针');
       }
+      
+      if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] removing previous action row');
     
       currentUser.pendingAction = 'review_reschedule';
       currentUser.pendingReviewAction = {
         pinId: window.reviewingPinId || currentUser.reviewingPinId,
-        nextReflectionDays: aiResponse.review.nextReflectionDays,
-        reasonCategory: aiResponse.review.reasonCategory,
-        stillAffectsUser: aiResponse.review.stillAffectsUser
+        nextReflectionDays: nextReflectionDays,
+        reasonCategory: reviewData.reasonCategory,
+        stillAffectsUser: reviewData.stillAffectsUser
       };
       UserStorage.updateUser(currentUser);
       UserStorage.setCurrentUser(currentUser.username);
       
       setTimeout(() => {
-        addReviewChoiceButtons(aiResponse.review.nextReflectionDays, aiResponse.review);
+        if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] rendering actions after assistant reply');
+        addReviewChoiceButtons(nextReflectionDays, reviewData);
       }, 300);
+    } else {
+      if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] actions skipped: initial diagnostic');
     }
   }
 }

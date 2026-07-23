@@ -55,9 +55,12 @@ currentGuides 规则：
 6. 不要使用医学、诊断、治疗类表达。
 
 coreIssue 规则：
-1. 必须具体，比如"被朋友误会没机会解释"，不要用"这件事还需要被安放"。
-2. 少于18个中文字符。
-3. 说出情绪卡住的具体点。`;
+1. 必须是 8-18 个中文字符的短标题/标签。
+2. 不要写完整句子，不要复述用户原话，不要使用省略号。
+3. 要概括真正卡住用户的核心点，格式像标题，不是一句安慰或总结。
+4. 优先包含具体对象或场景，例如朋友、情侣、家人、考试、工作。
+5. 不要太抽象，不要只写情绪，不要写"被理解""很难受""需要整理的情绪""这件事还需要被安放"。
+6. 好例子：被朋友误会后悔不知如何道歉、朋友不回消息带来的不安、担心努力没有达到期待、考试失利担心努力白费。`;
 
 function normalizeAnalysisResponse(parsed) {
   if (!parsed || typeof parsed !== 'object') return parsed;
@@ -69,11 +72,15 @@ function normalizeAnalysisResponse(parsed) {
     normalized.safe = String(normalized.safe).toLowerCase() === 'true';
   }
 
-  // Ensure coreIssue is a trimmed string
+  // Ensure coreIssue is a trimmed string and enforce max length for review panel title
   if (typeof normalized.coreIssue !== 'string') {
     normalized.coreIssue = String(normalized.coreIssue || '');
   }
   normalized.coreIssue = normalized.coreIssue.trim();
+  // Truncate to max 20 characters (since review panel shows this as a title)
+  if (normalized.coreIssue.length > 20) {
+    normalized.coreIssue = normalized.coreIssue.substring(0, 20) + '…';
+  }
 
   // Convert reflectionDays to number if it's a string
   if (normalized.reflectionDays !== null && normalized.reflectionDays !== undefined) {

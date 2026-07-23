@@ -117,79 +117,9 @@ function restoreChatPanel() {
   }
 }
 
-// Helper to ensure pin has analysis before proceeding
-// Handles race condition where review panel opens before analyze-worry finishes
-async function ensurePinAnalysis(pinId) {
-  if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis start: pinId', pinId);
+function showReviewPanel() {
+  const renderStartTime = Date.now();
   
-  const MAX_WAIT_MS = 15000;
-  const POLL_INTERVAL_MS = 200;
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < MAX_WAIT_MS) {
-    // Reload user from storage to get latest pin state
-    const currentUser = UserStorage.getCurrentUser();
-    if (!currentUser) {
-      if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: no currentUser');
-      return;
-    }
-    
-    const pin = currentUser.painPins.find(p => p.id === pinId);
-    if (!pin) {
-      if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: pin not found');
-      return;
-    }
-    
-    // Check if pin has valid coreIssue
-    const hasValidCoreIssue = pin.coreIssue && 
-                              pin.coreIssue.trim() && 
-                              pin.coreIssue !== '需要整理的情绪' && 
-                              pin.coreIssue !== '这件事还需要被安放';
-    
-    if (hasValidCoreIssue) {
-      if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis complete: coreIssue', pin.coreIssue);
-      return;
-    }
-    
-    // Check if analysis is still in progress
-    if (pin.aiAnalyzing === true) {
-      if (DEV_MODE) console.log('[TITLE DEBUG] waiting for pending analysis before review panel');
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-      continue;
-    }
-    
-    // Analysis not in progress and no valid coreIssue - trigger analysis
-    if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis: triggering analyze-worry');
-    
-    // Get user text for analysis
-    const userText = pin.chatHistory?.find(m => m.sender === 'user')?.text || '';
-    if (userText) {
-      // Set analyzing flag
-      pin.aiAnalyzing = true;
-      UserStorage.updateUser(currentUser);
-      
-      // Call analyzeWorryWithAI and wait for it
-      try {
-        await window.analyzeWorryWithAI(userText);
-        
-        // Reload pin after analysis
-        const updatedUser = UserStorage.getCurrentUser();
-        const updatedPin = updatedUser?.painPins.find(p => p.id === pinId);
-        if (updatedPin && updatedPin.coreIssue) {
-          if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis complete after analyze-worry: coreIssue', updatedPin.coreIssue);
-        }
-      } catch (error) {
-        if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: analyze-worry failed:', error);
-      }
-    }
-    
-    return;
-  }
-  
-  if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: timeout after', MAX_WAIT_MS, 'ms');
-}
-
-async function showReviewPanel() {
   if (DEV_MODE) {
     console.log('[REVIEW DEBUG] =========================');
     console.log('[REVIEW DEBUG] showReviewPanel called');
@@ -200,43 +130,46 @@ async function showReviewPanel() {
     existingPanel.remove();
   }
   
-  const oldestNeedle = findOldestCompletedNeedle();
-  if (!oldestNeedle) return;
+  // Reload user from storage to get the latest pin state
+  const currentUser = getCurrentUser();
+  if (!currentUser || !currentUser.painPins) return;
   
-  // Ensure pin has analysis before showing review panel
-  // This prevents race condition where review panel opens before analyze-worry finishes saving pin.coreIssue
-  await ensurePinAnalysis(oldestNeedle.id);
+  const oldestNeedle = currentUser.painPins.find(p => p.completed || p.hasNeedle);
+  if (!oldestNeedle) return;
   
   if (DEV_MODE) {
     console.log('[REVIEW DEBUG] pin id:', oldestNeedle.id);
   }
   
+  // Check if pin already has valid coreIssue
+  const hasValidCoreIssue = oldestNeedle.coreIssue && 
+                            oldestNeedle.coreIssue.trim() && 
+                            oldestNeedle.coreIssue !== '需要整理的情绪' && 
+                            oldestNeedle.coreIssue !== '这件事还需要被安放';
+  
+  // Determine initial issueText immediately (before any async operations)
   let issueText = '';
   let titleSource = 'none';
   
-  // Title-source order: pin.coreIssue → aiResult.coreIssue → first user message (fallback)
-  if (oldestNeedle.coreIssue && oldestNeedle.coreIssue.trim() && oldestNeedle.coreIssue !== '需要整理的情绪' && oldestNeedle.coreIssue !== '这件事还需要被安放') {
+  // Title-source order: pin.coreIssue → aiResult.coreIssue → pending placeholder → concise fallback
+  if (hasValidCoreIssue) {
     issueText = oldestNeedle.coreIssue.trim();
     titleSource = 'pin.coreIssue';
+    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pin.coreIssue');
   } else if (oldestNeedle.aiResult && oldestNeedle.aiResult.coreIssue && oldestNeedle.aiResult.coreIssue.trim() && oldestNeedle.aiResult.coreIssue !== '需要整理的情绪' && oldestNeedle.aiResult.coreIssue !== '这件事还需要被安放') {
     issueText = oldestNeedle.aiResult.coreIssue.trim();
     titleSource = 'aiResult.coreIssue';
-  } else if (oldestNeedle.chatHistory && oldestNeedle.chatHistory.length > 0) {
-    const firstUserMsg = oldestNeedle.chatHistory.find(msg => msg.sender === 'user');
-    if (firstUserMsg) {
-      // Clean line breaks and limit to max 18 chars for fallback
-      issueText = firstUserMsg.text.replace(/[\n\r]/g, ' ').trim();
-      if (issueText.length > 18) {
-        issueText = issueText.substring(0, 18);
-      }
-      titleSource = 'fallback first message';
-    }
-  }
-  
-  // Final fallback
-  if (!issueText) {
-    issueText = '这件事还没被说清';
-    titleSource = 'final fallback';
+    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pin.aiResult.coreIssue');
+  } else if (oldestNeedle.aiAnalyzing === true) {
+    // Analysis is in progress - show placeholder
+    issueText = '忧忧正在整理这根针...';
+    titleSource = 'pending placeholder';
+    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pending placeholder');
+  } else {
+    // No valid coreIssue and analysis not running - will trigger analysis
+    issueText = '忧忧正在整理这根针...';
+    titleSource = 'pending placeholder';
+    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pending placeholder');
   }
   
   // Ensure issueText is always a short title (max 20 chars) for review panel display
@@ -248,6 +181,7 @@ async function showReviewPanel() {
     console.log('[TITLE DEBUG] review panel title source:', titleSource);
     console.log('[TITLE DEBUG] review panel title value:', issueText);
     console.log('[TITLE DEBUG] saved coreIssue:', oldestNeedle.coreIssue);
+    console.log('[TITLE DEBUG] hasValidCoreIssue:', hasValidCoreIssue);
   }
   
   const reviewPanel = document.createElement('div');
@@ -311,6 +245,176 @@ async function showReviewPanel() {
   setTimeout(() => {
     reviewPanel.classList.add('show');
   }, 50);
+  
+  // Log immediate render completion
+  if (DEV_MODE) {
+    const renderDuration = Date.now() - renderStartTime;
+    console.log('[TITLE DEBUG] review panel rendered immediately');
+    console.log('[TITLE DEBUG] review panel initial render duration:', renderDuration, 'ms');
+  }
+  
+  // If pin doesn't have valid coreIssue, trigger analysis asynchronously and update panel when done
+  if (!hasValidCoreIssue) {
+    if (DEV_MODE) console.log('[TITLE DEBUG] background analysis started:', oldestNeedle.id);
+    
+    ensurePinAnalysisAsync(oldestNeedle.id, coreIssueLine);
+  }
+}
+
+// Async version of ensurePinAnalysis that updates the review panel when analysis completes
+async function ensurePinAnalysisAsync(pinId, coreIssueLineElement) {
+  // Check if analysis is already running to prevent duplicate requests
+  const initialUser = UserStorage.getCurrentUser();
+  const initialPin = initialUser?.painPins.find(p => p.id === pinId);
+  
+  if (initialPin && initialPin.aiAnalyzing === true) {
+    if (DEV_MODE) console.log('[TITLE DEBUG] background analysis already active:', pinId);
+  }
+  
+  const MAX_WAIT_MS = 15000;
+  const POLL_INTERVAL_MS = 200;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < MAX_WAIT_MS) {
+    // Reload user from storage to get latest pin state
+    const currentUser = UserStorage.getCurrentUser();
+    if (!currentUser) {
+      if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysisAsync: no currentUser');
+      return;
+    }
+    
+    const pin = currentUser.painPins.find(p => p.id === pinId);
+    if (!pin) {
+      if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysisAsync: pin not found');
+      return;
+    }
+    
+    // Check if pin has valid coreIssue
+    const hasValidCoreIssue = pin.coreIssue && 
+                              pin.coreIssue.trim() && 
+                              pin.coreIssue !== '需要整理的情绪' && 
+                              pin.coreIssue !== '这件事还需要被安放';
+    
+    if (hasValidCoreIssue) {
+      if (DEV_MODE) console.log('[TITLE DEBUG] summary updated asynchronously:', pin.coreIssue);
+      
+      // Check if the panel is still visible and showing the same pin (prevent stale updates)
+      const reviewPanel = chatScreen.querySelector('.summary-panel');
+      if (!reviewPanel) {
+        if (DEV_MODE) console.log('[TITLE DEBUG] stale summary update ignored');
+        return;
+      }
+      
+      // Verify we're updating the correct pin's panel
+      if (window.reviewingPinId !== pinId && window.activePinId !== pinId) {
+        if (DEV_MODE) console.log('[TITLE DEBUG] stale summary update ignored - pinId mismatch');
+        return;
+      }
+      
+      // Update the panel with the real coreIssue
+      let updatedText = pin.coreIssue.trim();
+      if (updatedText.length > 20) {
+        updatedText = updatedText.substring(0, 20) + '…';
+      }
+      coreIssueLineElement.textContent = updatedText;
+      
+      return;
+    }
+    
+    // Check if analysis is still in progress
+    if (pin.aiAnalyzing === true) {
+      if (DEV_MODE && Date.now() - startTime < 1000) console.log('[TITLE DEBUG] waiting for pending analysis');
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      continue;
+    }
+    
+    // Analysis not in progress and no valid coreIssue - trigger analysis
+    if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysisAsync: triggering analyze-worry');
+    
+    // Get user text for analysis
+    const userText = pin.chatHistory?.find(m => m.sender === 'user')?.text || '';
+    if (userText) {
+      // Set analyzing flag
+      pin.aiAnalyzing = true;
+      UserStorage.updateUser(currentUser);
+      
+      // Call analyzeWorryWithAI and wait for it
+      try {
+        await window.analyzeWorryWithAI(userText);
+        
+        // Reload pin after analysis
+        const updatedUser = UserStorage.getCurrentUser();
+        const updatedPin = updatedUser?.painPins.find(p => p.id === pinId);
+        
+        if (updatedPin && updatedPin.coreIssue) {
+          if (DEV_MODE) console.log('[TITLE DEBUG] summary updated asynchronously:', updatedPin.coreIssue);
+          
+          // Check if the panel is still visible and showing the same pin
+          const reviewPanel = chatScreen.querySelector('.summary-panel');
+          if (!reviewPanel) {
+            if (DEV_MODE) console.log('[TITLE DEBUG] stale summary update ignored');
+            return;
+          }
+          
+          // Verify we're updating the correct pin's panel
+          if (window.reviewingPinId !== pinId && window.activePinId !== pinId) {
+            if (DEV_MODE) console.log('[TITLE DEBUG] stale summary update ignored - pinId mismatch');
+            return;
+          }
+          
+          // Update the panel with the real coreIssue
+          let updatedText = updatedPin.coreIssue.trim();
+          if (updatedText.length > 20) {
+            updatedText = updatedText.substring(0, 20) + '…';
+          }
+          coreIssueLineElement.textContent = updatedText;
+        }
+      } catch (error) {
+        if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysisAsync: analyze-worry failed:', error);
+        
+        // Reset analyzing flag on failure
+        const failUser = UserStorage.getCurrentUser();
+        const failPin = failUser?.painPins.find(p => p.id === pinId);
+        if (failPin && failPin.aiAnalyzing === true) {
+          failPin.aiAnalyzing = false;
+          UserStorage.updateUser(failUser);
+        }
+        
+        // Set fallback on failure
+        const reviewPanel = chatScreen.querySelector('.summary-panel');
+        if (reviewPanel) {
+          // Verify we're updating the correct pin's panel
+          if (window.reviewingPinId !== pinId && window.activePinId !== pinId) {
+            if (DEV_MODE) console.log('[TITLE DEBUG] stale summary update ignored - pinId mismatch');
+            return;
+          }
+          coreIssueLineElement.textContent = '这件事还需要被安放';
+        }
+      }
+    }
+    
+    return;
+  }
+  
+  // Timeout - reset analyzing flag and set fallback text
+  const timeoutUser = UserStorage.getCurrentUser();
+  const timeoutPin = timeoutUser?.painPins.find(p => p.id === pinId);
+  if (timeoutPin && timeoutPin.aiAnalyzing === true) {
+    timeoutPin.aiAnalyzing = false;
+    UserStorage.updateUser(timeoutUser);
+  }
+  
+  const reviewPanel = chatScreen.querySelector('.summary-panel');
+  if (reviewPanel) {
+    // Verify we're updating the correct pin's panel
+    if (window.reviewingPinId !== pinId && window.activePinId !== pinId) {
+      if (DEV_MODE) console.log('[TITLE DEBUG] stale summary update ignored - pinId mismatch');
+      return;
+    }
+    coreIssueLineElement.textContent = '这件事还需要被安放';
+  }
+  
+  if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysisAsync: timeout after', MAX_WAIT_MS, 'ms');
 }
 
 function enterReviewChat(pinId, contextMessage) {

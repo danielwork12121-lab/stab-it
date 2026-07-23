@@ -192,7 +192,7 @@ readyToPin 必须是 true。
 
 readyToPin 和 readyToRemove 必须是 boolean。
 analysis 是可选的，但当 readyToPin 为 true 时，analysis 必须存在且包含 coreIssue、reflectionDays、warmExplanation 和 currentGuides（3个字符串）。
-analysis.coreIssue 是前端显示的"针标题/标签"，不是完整分析句。它要用几个关键词概括这件事最值得回看的具体卡点，像用户以后看到的一行标题。格式尽量是"事件关系 + 卡住点/后悔点/担心点"，不要写成完整长句。优先包含具体对象或场景，例如朋友、情侣、家人、考试、工作。不要太抽象，不要只写情绪，不要只写"被理解""很难受""需要整理的情绪"。长度尽量 8 到 16 个中文字符，最多不超过 20 个中文字符。例如：朋友误会后悔道歉、被朋友误会，怕失去、吵架后不知如何道歉、考试失利担心努力白费、情侣期待不同起冲突。
+analysis.coreIssue 必须是 8-18 个中文字符的短标题/标签。不要写完整句子。不要复述用户原话。不要使用省略号。不要超过 20 个中文字符。要概括真正卡住用户的核心点。格式像标题，而不是一句安慰或总结。优先包含具体对象或场景，例如朋友、情侣、家人、考试、工作。不要太抽象，不要只写情绪，不要只写"被理解""很难受""需要整理的情绪"。例如：被朋友误会后悔不知如何道歉、朋友不回消息带来的不安、担心努力没有达到期待、考试失利担心努力白费、情侣期待不同起冲突。
 analysis.reflectionDays 根据事情严重程度设置：小的日常烦躁3天，短期误会5天，中等关系冲突5-7天，强烈冲突7-14天，长期痛苦14天，重大事件30天。
 
 好例子：
@@ -850,6 +850,10 @@ function normalizeChatResponse(parsed) {
       normalized.analysis.coreIssue = String(normalized.analysis.coreIssue || '');
     }
     normalized.analysis.coreIssue = normalized.analysis.coreIssue.trim();
+    // Truncate to max 20 characters (since review panel shows this as a title)
+    if (normalized.analysis.coreIssue.length > 20) {
+      normalized.analysis.coreIssue = normalized.analysis.coreIssue.substring(0, 20) + '…';
+    }
 
     // Convert reflectionDays to number if it's a string
     if (normalized.analysis.reflectionDays !== null && normalized.analysis.reflectionDays !== undefined) {
