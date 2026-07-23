@@ -1,6 +1,6 @@
 function restoreAppState() {
   const currentUser = UserStorage.getCurrentUser();
-  
+
   if (DEV_MODE) {
     console.log('[RESTORE DEBUG] =========================');
     console.log('[RESTORE DEBUG] restoreAppState called');
@@ -13,14 +13,14 @@ function restoreAppState() {
     console.log('[RESTORE DEBUG] homeScreen visible:', homeScreen?.style.display !== 'none');
     console.log('[RESTORE DEBUG] chatScreen visible:', chatScreen?.style.display !== 'none');
   }
-  
+
   if (!currentUser) {
     if (DEV_MODE) console.log('[RESTORE DEBUG] No currentUser, showing auth screen');
     UserStorage.logout();
     showAuthScreen();
     return;
   }
-  
+
   if (currentUser.reviewingPinId) {
     const pin = currentUser.painPins?.find(p => p.id === currentUser.reviewingPinId);
     if (pin) {
@@ -65,7 +65,7 @@ function restoreAppState() {
     currentUser.pendingAction = null;
     currentUser.pendingReviewAction = null;
   }
-  
+
   if (currentUser.activePinId) {
     const pin = currentUser.painPins?.find(p => p.id === currentUser.activePinId);
     if (pin && !pin.completed) {
@@ -94,13 +94,13 @@ function restoreAppState() {
     if (DEV_MODE) console.log('[RESTORE DEBUG] activePinId points to missing/completed pin, clearing');
     currentUser.activePinId = null;
   }
-  
+
   if (currentUser.pendingAction && !currentUser.activePinId && !currentUser.reviewingPinId) {
     if (DEV_MODE) console.log('[RESTORE DEBUG] Clearing orphaned pendingAction:', currentUser.pendingAction);
     currentUser.pendingAction = null;
     currentUser.pendingReviewAction = null;
   }
-  
+
   UserStorage.updateUser(currentUser);
   UserStorage.setCurrentUser(currentUser.username);
   if (DEV_MODE) console.log('[RESTORE DEBUG] Showing home screen');
@@ -110,13 +110,28 @@ function restoreAppState() {
 document.addEventListener('DOMContentLoaded', () => {
   initAuth();
   initAudio();
-  
+
   homeScreen.addEventListener('click', (e) => {
+    // Guard: prevent pin creation during review mode
+    if (window.STABIT_MODE === 'reviewNeedle') {
+      if (DEV_MODE) console.log('[REVIEW ROUTE DEBUG] home click blocked during review');
+      return;
+    }
+
     const rect = homeScreen.getBoundingClientRect();
     const percentX = ((e.clientX - rect.left) / rect.width) * 100;
     const percentY = ((e.clientY - rect.top) / rect.height) * 100;
-    
+
     if (isInsideBodyZone(percentX, percentY)) {
+      // Clear review shortcut flag when starting new pin
+      const currentUser = getCurrentUser();
+      if (currentUser && currentUser.showReviewShortcut) {
+        currentUser.showReviewShortcut = false;
+        UserStorage.updateUser(currentUser);
+        UserStorage.setCurrentUser(currentUser.username);
+        if (DEV_MODE) console.log('[REVIEW SHORTCUT DEBUG] cleared by pinning');
+      }
+
       createPainDot(percentX, percentY);
       savePainDot(percentX, percentY);
       showHomeMessage('烦恼已经被忧忧接住了。');
@@ -127,22 +142,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showHomeMessage('请点击忧忧身上的位置来记录烦恼');
     }
   });
-  
-  chatScreen.addEventListener('click', (e) => {
-    const hasActiveReviewChat = document.querySelector('.chat-panel');
-    
-    if (window.STABIT_MODE === 'reviewNeedle' && 
-        window.STABIT_CHAT_MODE !== 'review' && 
-        !hasActiveReviewChat) {
-      const rect = chatScreen.getBoundingClientRect();
-      const percentX = ((e.clientX - rect.left) / rect.width) * 100;
-      const percentY = ((e.clientY - rect.top) / rect.height) * 100;
-      
-      if (isInsideBodyZone(percentX, percentY)) {
-        showReviewPanel();
-      }
-    }
-  });
-  
+
   restoreAppState();
 });
