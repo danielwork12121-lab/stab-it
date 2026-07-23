@@ -151,25 +151,21 @@ function showReviewPanel() {
   let issueText = '';
   let titleSource = 'none';
   
-  // Title-source order: pin.coreIssue → aiResult.coreIssue → pending placeholder → concise fallback
+  // Title-source order: pin.coreIssue → aiResult.coreIssue → legacy fallback
+  // No placeholder needed since analysis comes from /api/ai/chat response
   if (hasValidCoreIssue) {
     issueText = oldestNeedle.coreIssue.trim();
     titleSource = 'pin.coreIssue';
-    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pin.coreIssue');
+    if (DEV_MODE) console.log('[TITLE DEBUG] review title source: stored coreIssue');
   } else if (oldestNeedle.aiResult && oldestNeedle.aiResult.coreIssue && oldestNeedle.aiResult.coreIssue.trim() && oldestNeedle.aiResult.coreIssue !== '需要整理的情绪' && oldestNeedle.aiResult.coreIssue !== '这件事还需要被安放') {
     issueText = oldestNeedle.aiResult.coreIssue.trim();
     titleSource = 'aiResult.coreIssue';
     if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pin.aiResult.coreIssue');
-  } else if (oldestNeedle.aiAnalyzing === true) {
-    // Analysis is in progress - show placeholder
-    issueText = '忧忧正在整理这根针...';
-    titleSource = 'pending placeholder';
-    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pending placeholder');
   } else {
-    // No valid coreIssue and analysis not running - will trigger analysis
-    issueText = '忧忧正在整理这根针...';
-    titleSource = 'pending placeholder';
-    if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pending placeholder');
+    // Legacy fallback for pins created before the single-call architecture
+    issueText = '这段还未完全放下的烦恼';
+    titleSource = 'legacy fallback';
+    if (DEV_MODE) console.log('[TITLE DEBUG] legacy fallback used');
   }
   
   // Ensure issueText is always a short title (max 20 chars) for review panel display
@@ -251,13 +247,6 @@ function showReviewPanel() {
     const renderDuration = Date.now() - renderStartTime;
     console.log('[TITLE DEBUG] review panel rendered immediately');
     console.log('[TITLE DEBUG] review panel initial render duration:', renderDuration, 'ms');
-  }
-  
-  // If pin doesn't have valid coreIssue, trigger analysis asynchronously and update panel when done
-  if (!hasValidCoreIssue) {
-    if (DEV_MODE) console.log('[TITLE DEBUG] background analysis started:', oldestNeedle.id);
-    
-    ensurePinAnalysisAsync(oldestNeedle.id, coreIssueLine);
   }
 }
 

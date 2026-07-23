@@ -988,41 +988,10 @@ async function sendMessage() {
         console.log('[SEND MESSAGE DEBUG] Pin aiAnalyzing:', freshPin?.aiAnalyzing);
       }
       
-      const needsBackgroundAnalysis = 
-        chatResponse && 
-        chatResponse.readyToPin && 
-        !chatResponse.analysis && 
-        freshPin && 
-        !freshPin.aiAnalyzed && 
-        !freshPin.aiAnalyzing;
-      
-      if (needsBackgroundAnalysis) {
-        if (DEV_MODE) console.log('[SEND MESSAGE DEBUG] Starting background analyze-worry - readyToPin=true but no analysis from chat');
-        if (DEV_MODE) console.log('[AI DEBUG] background analyze-worry started because no real analysis');
-        
-        const currentUser = getCurrentUser();
-        if (currentUser) {
-          const targetPin = currentUser.painPins.find(p => p.id === freshPin.id);
-          if (targetPin) {
-            targetPin.aiAnalyzing = true;
-            UserStorage.updateUser(currentUser);
-            UserStorage.setCurrentUser(currentUser.username);
-          }
-        }
-        
-        analyzeWorryWithAI(text).catch(err => {
-          if (DEV_MODE) console.warn('[AI DEBUG] Background analyze-worry failed:', err);
-        });
-      } else if (DEV_MODE) {
-        if (chatResponse?.analysis) {
-          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already returned from /api/ai/chat');
-        } else if (!chatResponse?.readyToPin) {
-          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - readyToPin is false, conversation still ongoing');
-        } else if (freshPin?.aiAnalyzed) {
-          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already saved from chat response');
-        } else if (freshPin?.aiAnalyzing) {
-          console.log('[SEND MESSAGE DEBUG] Skipping background analyze-worry - analysis already in progress');
-        }
+      // Analysis metadata is now generated in the single /api/ai/chat call
+      // processChatAIResponse() handles saving analysis to pin when present
+      if (DEV_MODE && chatResponse?.analysis) {
+        console.log('[SEND MESSAGE DEBUG] Analysis received from single /api/ai/chat call - no background analyze-worry needed');
       }
     }
   } finally {
@@ -1270,13 +1239,24 @@ async function callAIChat(userText, options = {}) {
       return false;
     }
 
+    // Add pipeline tracing
+    if (DEV_MODE) {
+      console.log('[PIPELINE DEBUG] raw /api/ai/chat response:', JSON.stringify(aiResponse).substring(0, 500));
+      console.log('[PIPELINE DEBUG] analysis received:', !!aiResponse.analysis);
+    }
+    
     const processedResponse = {
       reply: aiResponse.reply,
       readyToPin: !!aiResponse.readyToPin,
       readyToRemove: !!aiResponse.readyToRemove,
       analysis: aiResponse.analysis,
-      review: aiResponse.review
+      review: aiResponse.review,
+      reviewDays: aiResponse.reviewDays
     };
+    
+    if (DEV_MODE) {
+      console.log('[PIPELINE DEBUG] processChatAIResponse analysis:', processedResponse.analysis ? JSON.stringify(processedResponse.analysis).substring(0, 300) : 'undefined');
+    }
     
     processChatAIResponse(processedResponse);
     return processedResponse;
@@ -1324,7 +1304,6 @@ async function callAIChat(userText, options = {}) {
 
 function processChatAIResponse(aiResponse) {
   const mode = window.STABIT_CHAT_MODE;
-  const currentUser = getCurrentUser();
   
   if (DEV_MODE) {
     console.log('[AI RESPONSE DEBUG] =========================');
@@ -1334,42 +1313,111 @@ function processChatAIResponse(aiResponse) {
     console.log('[AI RESPONSE DEBUG] readyToRemove:', aiResponse.readyToRemove);
     console.log('[AI RESPONSE DEBUG] Has analysis:', !!aiResponse.analysis);
     console.log('[AI RESPONSE DEBUG] Mode:', mode);
-    console.log('[REVIEW DEBUG] current reviewStage before processing AI response:', currentUser?.reviewStage);
   }
   
   addMessage('bot', aiResponse.reply);
   saveMessage('bot', aiResponse.reply);
   
+  // Get currentUser AFTER saveMessage() to avoid stale object issues
+  // saveMessage() fetches a fresh user, adds chatHistory, and saves it
+  // If we get currentUser before saveMessage(), we'd be modifying a stale object
+  // that doesn't include the chatHistory update, and saving it would overwrite
+  // the fresh user that saveMessage() just persisted
+  const currentUser = getCurrentUser();
+  
+  if (DEV_MODE) {
+    console.log('[REVIEW DEBUG] current reviewStage after saveMessage:', currentUser?.reviewStage);
+  }
+  
   if (aiResponse.analysis) {
-    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] chat analysis source: /api/ai/chat');
+    if (DEV_MODE) {
+      console.log('[AI RESPONSE DEBUG] chat analysis source: /api/ai/chat');
+      console.log('[PIN ANALYSIS DEBUG] metadata received');
+    }
     
-    const currentUser = getCurrentUser();
     if (currentUser) {
       const chatPin = getCurrentChatPin();
+      
+      if (DEV_MODE) {
+        console.log('[PIPELINE DEBUG] chatPin id:', chatPin?.id);
+        console.log('[PIPELINE DEBUG] activePinId:', window.activePinId);
+        console.log('[PIPELINE DEBUG] painPins ids:', currentUser.painPins.map(p => p.id));
+      }
+      
+      if (!chatPin) {
+        if (DEV_MODE) {
+          console.warn('[PIPELINE DEBUG] chatPin is null — activePinId:', window.activePinId);
+          console.warn('[PIPELINE DEBUG] chatPin is null — currentUser.activePinId:', currentUser.activePinId);
+        }
+        return;
+      }
+      
       if (chatPin) {
         const targetPin = currentUser.painPins.find(p => p.id === chatPin.id);
+        
+        if (DEV_MODE) {
+          console.log('[PIPELINE DEBUG] targetPin found:', !!targetPin);
+        }
+        
         if (targetPin) {
-          targetPin.coreIssue = aiResponse.analysis.coreIssue;
-          targetPin.reflectionDays = aiResponse.analysis.reflectionDays;
+          const wasAnalyzed = targetPin.aiAnalyzed;
+          const hadCoreIssue = targetPin.coreIssue && targetPin.coreIssue.trim();
+          
+          // Update coreIssue if:
+          // 1. The new value is not empty, AND
+          // 2. Either the pin doesn't have an existing coreIssue, OR the new value is not a generic placeholder
+          const newCoreIssue = aiResponse.analysis.coreIssue?.trim();
+          const isPlaceholder = newCoreIssue === '需要整理的情绪' || newCoreIssue === '这件事还需要被安放';
+          if (newCoreIssue && (!hadCoreIssue || !isPlaceholder)) {
+            targetPin.coreIssue = newCoreIssue;
+          }
+          
+          // Always update reflectionDays if valid
+          if (aiResponse.analysis.reflectionDays > 0) {
+            targetPin.reflectionDays = aiResponse.analysis.reflectionDays;
+          }
+          
           targetPin.warmExplanation = aiResponse.analysis.warmExplanation;
           targetPin.currentGuides = aiResponse.analysis.currentGuides;
           targetPin.aiResult = aiResponse.analysis;
+          targetPin.aiAnalyzedAt = Date.now();
+          targetPin.reviewReadyAfterDays = aiResponse.analysis.reflectionDays;
           targetPin.aiAnalyzed = true;
           targetPin.aiAnalyzing = false;
           
           if (DEV_MODE) {
-            console.log('[AI RESPONSE DEBUG] Analysis saved to pin:', targetPin.id, 'coreIssue:', aiResponse.analysis.coreIssue);
+            console.log('[PIN ANALYSIS DEBUG] coreIssue saved:', aiResponse.analysis.coreIssue);
+            console.log('[PIN ANALYSIS DEBUG] reflectionDays saved:', aiResponse.analysis.reflectionDays);
+            if (wasAnalyzed && aiResponse.analysis.coreIssue !== targetPin.coreIssue) {
+              console.log('[PIN ANALYSIS DEBUG] analysis refined');
+            }
           }
           
           UserStorage.updateUser(currentUser);
           UserStorage.setCurrentUser(currentUser.username);
+          
+          // Reload storage and verify the fields exist
+          if (DEV_MODE) {
+            const reloadedUser = UserStorage.getCurrentUser();
+            const reloadedPin = reloadedUser?.painPins.find(p => p.id === targetPin.id);
+            console.log('[PIPELINE DEBUG] stored pin after metadata save:', {
+              id: reloadedPin?.id,
+              coreIssue: reloadedPin?.coreIssue,
+              reflectionDays: reloadedPin?.reflectionDays,
+              aiAnalyzed: reloadedPin?.aiAnalyzed,
+              aiResult: reloadedPin?.aiResult ? JSON.stringify(reloadedPin?.aiResult).substring(0, 200) : undefined
+            });
+          }
         }
       }
     }
   }
   
   if (mode === 'pinning' && aiResponse.readyToPin) {
-    if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToPin true, showing "交给忧忧" button');
+    if (DEV_MODE) {
+      console.log('[AI RESPONSE DEBUG] readyToPin true, showing "交给忧忧" button');
+      console.log('[PIN ANALYSIS DEBUG] no secondary analyze-worry request');
+    }
     
     if (currentUser) {
       currentUser.pendingAction = 'pin';
@@ -1423,7 +1471,7 @@ function processChatAIResponse(aiResponse) {
         });
       }, 300);
     } else if (!wasInitialDiagnostic) {
-      // Always show review choice buttons after every AI reply once initial diagnostic is complete
+      // Show review choice buttons after initial diagnostic is complete
       const pin = getCurrentChatPin();
       
       // Check if pin is still active
@@ -1433,15 +1481,60 @@ function processChatAIResponse(aiResponse) {
         return;
       }
       
-      const nextReflectionDays = aiResponse.review?.nextReflectionDays || pin?.reflectionDays || 5;
+      // Priority order: reviewDays (top-level) > review.nextReflectionDays > pin.reflectionDays
+      // reviewDays allows the AI to dynamically control the exact number of days
+      const reviewDays = aiResponse.reviewDays;
+      const apiDays = aiResponse.review?.nextReflectionDays;
+      
+      // Validate reviewDays: must be a finite positive whole number
+      const isValidReviewDays = reviewDays !== null && 
+                                reviewDays !== undefined && 
+                                Number.isFinite(reviewDays) && 
+                                reviewDays > 0 && 
+                                Math.floor(reviewDays) === reviewDays;
+      
+      // Determine the final days value
+      let nextReflectionDays;
+      if (isValidReviewDays) {
+        nextReflectionDays = reviewDays;
+        // Update pin.reflectionDays with the new value
+        pin.reflectionDays = reviewDays;
+        UserStorage.updateUser(currentUser);
+        UserStorage.setCurrentUser(currentUser.username);
+        if (DEV_MODE) {
+          console.log('[REVIEW DAYS DEBUG] AI reviewDays received:', reviewDays);
+          console.log('[REVIEW DAYS DEBUG] pin reflectionDays updated:', reviewDays);
+        }
+      } else {
+        // Fall back to existing sources
+        nextReflectionDays = apiDays ?? pin?.reflectionDays ?? 5;
+        if (reviewDays !== null && reviewDays !== undefined && !isValidReviewDays) {
+          if (DEV_MODE) console.log('[REVIEW DAYS DEBUG] invalid reviewDays ignored:', reviewDays);
+        }
+        if (!isValidReviewDays && reviewDays === null) {
+          if (DEV_MODE) console.log('[REVIEW DAYS DEBUG] previous value retained:', nextReflectionDays);
+        }
+      }
+      
       const reviewData = aiResponse.review || {};
       
       if (DEV_MODE) {
         console.log('[AI RESPONSE DEBUG] =========================');
-        console.log('[AI RESPONSE DEBUG] showing review choice buttons after every AI reply');
-        console.log('[AI RESPONSE DEBUG] nextReflectionDays:', nextReflectionDays, '(source:', aiResponse.review?.nextReflectionDays ? 'api' : pin?.reflectionDays ? 'pin' : 'default', ')');
+        console.log('[AI RESPONSE DEBUG] API reviewDays:', reviewDays, '(valid:', isValidReviewDays, ')');
+        console.log('[AI RESPONSE DEBUG] API nextReflectionDays:', apiDays);
+        console.log('[AI RESPONSE DEBUG] final nextReflectionDays:', nextReflectionDays, '(source:', isValidReviewDays ? 'reviewDays' : apiDays !== null && apiDays !== undefined ? 'api' : pin?.reflectionDays ? 'pin' : 'default', ')');
         console.log('[AI RESPONSE DEBUG] reviewStage:', currentUser.reviewStage);
+      }
+      
+      // If API explicitly returns null for days, don't show buttons - continue chatting
+      if ((apiDays === null && reviewDays === null) || (reviewDays !== null && !isValidReviewDays && apiDays === null)) {
+        if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] actions skipped: AI returned nextReflectionDays=null (unclear reason)');
+        return;
+      }
+      
+      if (DEV_MODE) {
         console.log('[REVIEW DEBUG] showing review choice buttons: 继续聊 +', nextReflectionDays, '天后看 + 取下针');
+        console.log('[REVIEW DAYS DEBUG] action label rendered:', nextReflectionDays, '天后看');
       }
       
       if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] removing previous action row');
@@ -1871,6 +1964,7 @@ function rescheduleReview(nextReflectionDays, reviewData) {
     console.log('[REVIEW LOOP DEBUG] =========================');
     console.log('[REVIEW LOOP DEBUG] reschedule clicked');
     console.log('[REVIEW DEBUG] reschedule selected:', nextReflectionDays, 'days');
+    console.log('[REVIEW DAYS DEBUG] pin rescheduled by exactly', nextReflectionDays, 'days');
   }
   
   hidePersistentUnpinButton();
