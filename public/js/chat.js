@@ -1797,6 +1797,7 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   if (DEV_MODE) console.log('[CHAT DEBUG] styled review action buttons rendered with three options');
 }
 window.addReviewChoiceButtons = addReviewChoiceButtons;
+window.analyzeWorryWithAI = analyzeWorryWithAI;
 
 function rescheduleReview(nextReflectionDays, reviewData) {
   if (DEV_MODE) {

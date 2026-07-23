@@ -117,7 +117,79 @@ function restoreChatPanel() {
   }
 }
 
-function showReviewPanel() {
+// Helper to ensure pin has analysis before proceeding
+// Handles race condition where review panel opens before analyze-worry finishes
+async function ensurePinAnalysis(pinId) {
+  if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis start: pinId', pinId);
+  
+  const MAX_WAIT_MS = 15000;
+  const POLL_INTERVAL_MS = 200;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < MAX_WAIT_MS) {
+    // Reload user from storage to get latest pin state
+    const currentUser = UserStorage.getCurrentUser();
+    if (!currentUser) {
+      if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: no currentUser');
+      return;
+    }
+    
+    const pin = currentUser.painPins.find(p => p.id === pinId);
+    if (!pin) {
+      if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: pin not found');
+      return;
+    }
+    
+    // Check if pin has valid coreIssue
+    const hasValidCoreIssue = pin.coreIssue && 
+                              pin.coreIssue.trim() && 
+                              pin.coreIssue !== '需要整理的情绪' && 
+                              pin.coreIssue !== '这件事还需要被安放';
+    
+    if (hasValidCoreIssue) {
+      if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis complete: coreIssue', pin.coreIssue);
+      return;
+    }
+    
+    // Check if analysis is still in progress
+    if (pin.aiAnalyzing === true) {
+      if (DEV_MODE) console.log('[TITLE DEBUG] waiting for pending analysis before review panel');
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      continue;
+    }
+    
+    // Analysis not in progress and no valid coreIssue - trigger analysis
+    if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis: triggering analyze-worry');
+    
+    // Get user text for analysis
+    const userText = pin.chatHistory?.find(m => m.sender === 'user')?.text || '';
+    if (userText) {
+      // Set analyzing flag
+      pin.aiAnalyzing = true;
+      UserStorage.updateUser(currentUser);
+      
+      // Call analyzeWorryWithAI and wait for it
+      try {
+        await window.analyzeWorryWithAI(userText);
+        
+        // Reload pin after analysis
+        const updatedUser = UserStorage.getCurrentUser();
+        const updatedPin = updatedUser?.painPins.find(p => p.id === pinId);
+        if (updatedPin && updatedPin.coreIssue) {
+          if (DEV_MODE) console.log('[TITLE DEBUG] ensurePinAnalysis complete after analyze-worry: coreIssue', updatedPin.coreIssue);
+        }
+      } catch (error) {
+        if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: analyze-worry failed:', error);
+      }
+    }
+    
+    return;
+  }
+  
+  if (DEV_MODE) console.warn('[TITLE DEBUG] ensurePinAnalysis: timeout after', MAX_WAIT_MS, 'ms');
+}
+
+async function showReviewPanel() {
   if (DEV_MODE) {
     console.log('[REVIEW DEBUG] =========================');
     console.log('[REVIEW DEBUG] showReviewPanel called');
@@ -131,27 +203,51 @@ function showReviewPanel() {
   const oldestNeedle = findOldestCompletedNeedle();
   if (!oldestNeedle) return;
   
+  // Ensure pin has analysis before showing review panel
+  // This prevents race condition where review panel opens before analyze-worry finishes saving pin.coreIssue
+  await ensurePinAnalysis(oldestNeedle.id);
+  
   if (DEV_MODE) {
     console.log('[REVIEW DEBUG] pin id:', oldestNeedle.id);
   }
   
-  let issueText = oldestNeedle.coreIssue || '';
-  if (!issueText && oldestNeedle.chatHistory && oldestNeedle.chatHistory.length > 0) {
+  let issueText = '';
+  let titleSource = 'none';
+  
+  // Title-source order: pin.coreIssue → aiResult.coreIssue → first user message (fallback)
+  if (oldestNeedle.coreIssue && oldestNeedle.coreIssue.trim() && oldestNeedle.coreIssue !== '需要整理的情绪' && oldestNeedle.coreIssue !== '这件事还需要被安放') {
+    issueText = oldestNeedle.coreIssue.trim();
+    titleSource = 'pin.coreIssue';
+  } else if (oldestNeedle.aiResult && oldestNeedle.aiResult.coreIssue && oldestNeedle.aiResult.coreIssue.trim() && oldestNeedle.aiResult.coreIssue !== '需要整理的情绪' && oldestNeedle.aiResult.coreIssue !== '这件事还需要被安放') {
+    issueText = oldestNeedle.aiResult.coreIssue.trim();
+    titleSource = 'aiResult.coreIssue';
+  } else if (oldestNeedle.chatHistory && oldestNeedle.chatHistory.length > 0) {
     const firstUserMsg = oldestNeedle.chatHistory.find(msg => msg.sender === 'user');
     if (firstUserMsg) {
-      issueText = firstUserMsg.text.substring(0, 20);
-      if (firstUserMsg.text.length > 20) {
-        issueText += '...';
+      // Clean line breaks and limit to max 18 chars for fallback
+      issueText = firstUserMsg.text.replace(/[\n\r]/g, ' ').trim();
+      if (issueText.length > 18) {
+        issueText = issueText.substring(0, 18);
       }
+      titleSource = 'fallback first message';
     }
   }
   
+  // Final fallback
   if (!issueText) {
-    issueText = oldestNeedle.warmExplanation || '这件事还需要被安放';
+    issueText = '这件事还没被说清';
+    titleSource = 'final fallback';
+  }
+  
+  // Ensure issueText is always a short title (max 20 chars) for review panel display
+  if (issueText.length > 20) {
+    issueText = issueText.substring(0, 20) + '…';
   }
   
   if (DEV_MODE) {
-    console.log('[REVIEW DEBUG] coreIssue used:', issueText);
+    console.log('[TITLE DEBUG] review panel title source:', titleSource);
+    console.log('[TITLE DEBUG] review panel title value:', issueText);
+    console.log('[TITLE DEBUG] saved coreIssue:', oldestNeedle.coreIssue);
   }
   
   const reviewPanel = document.createElement('div');
