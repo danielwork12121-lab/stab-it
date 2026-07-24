@@ -31,7 +31,7 @@ function injectDayBadgeStyles() {
     }
     .review-shortcut {
       position: absolute;
-      bottom: 8%;
+      bottom: 3%;
       left: 50%;
       transform: translateX(-50%);
       padding: 14px 28px;

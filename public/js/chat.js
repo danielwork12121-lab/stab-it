@@ -1461,27 +1461,7 @@ function processChatAIResponse(aiResponse) {
     if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] initial diagnostic complete:', !wasInitialDiagnostic);
 
     // Buttons should only show after the initial diagnostic (first user reply + AI response)
-    if (aiResponse.readyToRemove && !wasInitialDiagnostic) {
-      if (DEV_MODE) console.log('[AI RESPONSE DEBUG] readyToRemove true, showing remove button');
-
-      currentUser.pendingAction = 'remove';
-      currentUser.pendingReviewAction = null;
-      UserStorage.updateUser(currentUser);
-      UserStorage.setCurrentUser(currentUser.username);
-
-      // Hide persistent unpin button and show dedicated remove button
-      hidePersistentUnpinButton();
-      setTimeout(() => {
-        addActionButton('轻轻取下这根针', () => {
-          if (currentUser) {
-            currentUser.pendingAction = null;
-            UserStorage.updateUser(currentUser);
-            UserStorage.setCurrentUser(currentUser.username);
-          }
-          removeReviewedNeedleWithAnimation();
-        });
-      }, 300);
-    } else if (!wasInitialDiagnostic) {
+    if (!wasInitialDiagnostic) {
       // Show review choice buttons after initial diagnostic is complete
       const pin = getCurrentChatPin();
 
@@ -1537,11 +1517,7 @@ function processChatAIResponse(aiResponse) {
         console.log('[AI RESPONSE DEBUG] reviewStage:', currentUser.reviewStage);
       }
 
-      // If API explicitly returns null for days, don't show buttons - continue chatting
-      if ((apiDays === null && reviewDays === null) || (reviewDays !== null && !isValidReviewDays && apiDays === null)) {
-        if (DEV_MODE) console.log('[REVIEW ACTIONS DEBUG] actions skipped: AI returned nextReflectionDays=null (unclear reason)');
-        return;
-      }
+      // Always show review action buttons - nextReflectionDays already has fallback value from pin.reflectionDays or default 5
 
       if (DEV_MODE) {
         console.log('[REVIEW DEBUG] showing review choice buttons: 继续聊 +', nextReflectionDays, '天后看 + 取下针');

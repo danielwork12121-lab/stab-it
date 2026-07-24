@@ -3,7 +3,7 @@ const DOUBAO_TIMEOUT_MS = 30000;
 
 const FALLBACK_RESPONSE = {
   safe: true,
-  coreIssue: '这件事还需要被安放',
+  coreIssue: '需要回顾的烦恼',
   reflectionDays: 5,
   warmExplanation: '我先帮你把这件事轻轻收好，等你准备好再回来看看。',
   currentGuides: [
@@ -68,7 +68,7 @@ coreIssue 规则（非常重要）：
 3. 要概括真正卡住用户的核心点，格式像标题，不是一句安慰或总结。
 4. 必须包含具体对象或场景（朋友、情侣、家人、考试、工作、同事等）。
 5. 必须包含情绪卡点或核心冲突（误解、期待不同、不被认可、担心失败等）。
-6. 不要太抽象，不要只写情绪，不要写"被理解""很难受""需要整理的情绪""这件事还需要被安放"。
+6. 不要太抽象，不要只写情绪，不要写泛化安慰语、纯情绪描述，或没有具体对象/冲突的标题。
 7. 格式：[具体对象/场景] + [核心冲突/情绪卡点]
 
 好例子：
@@ -87,8 +87,7 @@ coreIssue 规则（非常重要）：
 - "这件事让我很难受"（太模糊，无具体对象）
 - "我和朋友吵架了"（只复述事件，无核心冲突）
 - "被理解"（太抽象）
-- "需要整理的情绪"（太模糊）
-- "这件事还需要被安放"（不符合要求）`;
+- "很难受"（纯情绪描述，无具体对象）`;
 
 function normalizeAnalysisResponse(parsed) {
   if (!parsed || typeof parsed !== 'object') return parsed;
@@ -105,6 +104,21 @@ function normalizeAnalysisResponse(parsed) {
     normalized.coreIssue = String(normalized.coreIssue || '');
   }
   normalized.coreIssue = normalized.coreIssue.trim();
+  
+  // Filter out invalid generic coreIssue values
+  const invalidCoreIssues = [
+    '这件事还需要被安放',
+    '这段还未完全放下的烦恼',
+    '需要被理解',
+    '很难受',
+    '需要整理的情绪'
+  ];
+  
+  if (invalidCoreIssues.includes(normalized.coreIssue)) {
+    console.warn('[AI ANALYZE] Invalid generic coreIssue:', normalized.coreIssue);
+    normalized.coreIssue = '未识别具体烦恼';
+  }
+  
   // Truncate to max 20 characters (since review panel shows this as a title)
   if (normalized.coreIssue.length > 20) {
     normalized.coreIssue = normalized.coreIssue.substring(0, 20) + '…';
