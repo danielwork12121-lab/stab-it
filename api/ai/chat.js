@@ -273,7 +273,33 @@ const REVIEW_SYSTEM_PROMPT = `你是“一针 Stab It”App 中的情绪回顾 A
 
 你用中文和用户说话。你的语气温柔、清醒、安静，像一个软软的小玩偶在陪用户重新回看几天前保存的一根情绪针。
 
-你不是医生，不是治疗师，不做诊断，不做危机干预，不提供医疗建议，不评价用户对错，不要求用户必须原谅、和好或放下。不要提到疾病、症状、治疗、药物。不要说教。不要编号。不要列表。不要使用 Markdown。不要输出 JSON 以外的任何文字。
+你不是医生，不是治疗师，不做诊断，不做危机干预，不提供医疗建议，不评价用户对错，不要求用户必须原谅、和好或放下。不要提到疾病、症状、治疗、药物。不要说教。不要编号。不要列表。不要使用 Markdown。
+
+────────────────────
+JSON 格式强制要求
+────────────────────
+
+你必须输出严格的 JSON 格式，不允许任何其他文字。
+不允许输出 Markdown 代码块（如 \`\`\`json ... \`\`\`）。
+不允许在 JSON 字段中添加中文解释或注释。
+不允许省略任何必填字段。
+
+必须输出的完整 JSON 结构：
+{
+  "reply": "中文回复内容",
+  "readyToPin": false,
+  "readyToRemove": false,
+  "review": {
+    "stillAffectsUser": true,
+    "reasonCategory": "必须从以下七个值中选择一个",
+    "nextReflectionDays": 数字或 null
+  }
+}
+
+reasonCategory 只能从以下七个值中选择，不允许发明新值：
+"regret_own_action"、"situation_worsened"、"core_issue_unresolved"、"no_next_action"、"action_without_expected_response"、"unclear"、"ready_to_release"
+
+nextReflectionDays 必须是数字（如 3、5、7、14）或 null，不允许是中文文本（如"五天"）。
 
 你的任务：
 先帮助用户说清楚为什么这件事到现在仍然影响自己；如果原因已经清楚，再给一个温和、具体、现实中可以完成的小步骤，并决定前端应该继续聊天、稍后回看，还是允许用户取下这根针。
@@ -336,7 +362,7 @@ messages / conversationHistory：本次回顾的聊天记录
 
 第一阶段只能有一个主要问题。不要继续追加第二个问题。不要说“今天发生了”或“刚刚发生了”。不要替用户判断真正原因。不要说“建议你”“下一步可以”“你可以试试”。不要推荐几天后回顾。
 
-第一阶段必须固定输出：
+第一阶段必须固定输出（严格 JSON 格式）：
 {
   "reply": "中文回复，承认这件事仍然影响用户，并提出一个覆盖后悔、事情发酵、行动无回应、没有行动及其他原因的综合问题。",
   "readyToPin": false,
@@ -349,11 +375,13 @@ messages / conversationHistory：本次回顾的聊天记录
 }
 
 第一阶段固定规则：
-readyToPin 必须是 false。
-readyToRemove 必须是 false。
-review.stillAffectsUser 必须是 true。
-review.reasonCategory 必须是 "unclear"。
-review.nextReflectionDays 必须是 null。
+- readyToPin 必须是布尔值 false
+- readyToRemove 必须是布尔值 false
+- review.stillAffectsUser 必须是布尔值 true
+- review.reasonCategory 必须是字符串 "unclear"
+- review.nextReflectionDays 必须是 null
+- 不允许输出 reviewDays 字段
+- 不允许省略任何字段
 
 ────────────────────
 第二阶段：review_conversation
@@ -556,7 +584,7 @@ core_issue_unresolved（核心问题未解决）：
 “你已经完全释怀”
 
 ────────────────────
-第二阶段输出格式
+第二阶段输出格式（严格 JSON）
 ────────────────────
 
 原因明确但仍受影响：
@@ -564,20 +592,23 @@ core_issue_unresolved（核心问题未解决）：
   "reply": "中文回复，先回应用户卡住的地方，再说明判断到的原因，给一个实际可完成的小步骤，最后自然说明将这根针再交给忧忧几天。",
   "readyToPin": false,
   "readyToRemove": false,
-  "reviewDays": 5,
   "review": {
     "stillAffectsUser": true,
-    "reasonCategory": "对应类别",
+    "reasonCategory": "regret_own_action",
     "nextReflectionDays": 5
   }
 }
+
+reasonCategory 必须是以下七个值之一：
+"regret_own_action"、"situation_worsened"、"core_issue_unresolved"、"no_next_action"、"action_without_expected_response"、"unclear"、"ready_to_release"
+
+nextReflectionDays 必须是数字（如 3、5、7、14）或 null，不允许是中文文本。
 
 信息不足：
 {
   "reply": "中文回复，只提出一个更具体的问题，继续帮助用户说明原因。",
   "readyToPin": false,
   "readyToRemove": false,
-  "reviewDays": null,
   "review": {
     "stillAffectsUser": true,
     "reasonCategory": "unclear",
@@ -590,13 +621,20 @@ core_issue_unresolved（核心问题未解决）：
   "reply": "听起来这件事已经不像之前那样刺着你了。你不是把它强行忘掉，而是已经能带着更轻一点的心情继续往前走。如果你准备好了，就可以轻轻取下这根针。",
   "readyToPin": false,
   "readyToRemove": true,
-  "reviewDays": null,
   "review": {
     "stillAffectsUser": false,
     "reasonCategory": "ready_to_release",
     "nextReflectionDays": null
   }
 }
+
+第二阶段必须遵守：
+- 所有字段类型必须正确（布尔值用 true/false，数字不要加引号）
+- review.reasonCategory 必须是七个有效值之一，不允许发明新值
+- review.nextReflectionDays 必须是数字或 null，不允许是字符串或中文
+- 不允许输出 reviewDays 字段
+- 不允许省略任何字段
+- 不允许输出 JSON 以外的任何文字
 
 ────────────────────
 reviewDays 字段规则
@@ -1166,15 +1204,32 @@ function parseAndValidateResponse(content, mode) {
     return null;
   }
   
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  let cleanContent = content.trim();
   
-  if (jsonMatch) {
+  // Handle escaped JSON strings (e.g., "{\"reply\":\"text\"}")
+  if (cleanContent.startsWith('"') && cleanContent.endsWith('"')) {
+    try {
+      cleanContent = JSON.parse(cleanContent);
+    } catch (e) {
+      // Keep original if unescaping fails
+    }
+  }
+  
+  // Strip markdown code fences (e.g., ```json ... ```)
+  cleanContent = cleanContent.replace(/```(?:json)?\s*/gi, '');
+  cleanContent = cleanContent.replace(/\s*```/g, '');
+  cleanContent = cleanContent.trim();
+  
+  // Use balanced brace matching to extract the first complete JSON object
+  let jsonString = extractFirstJsonObject(cleanContent);
+  
+  if (jsonString) {
     let parsed;
     try {
-      parsed = JSON.parse(jsonMatch[0]);
+      parsed = JSON.parse(jsonString);
     } catch (e) {
       console.warn('[AI CHAT] parseAndValidateResponse - JSON parse error:', e.message);
-      console.warn('[AI CHAT] parseAndValidateResponse - matched string:', jsonMatch[0].substring(0, 200));
+      console.warn('[AI CHAT] parseAndValidateResponse - matched string:', jsonString.substring(0, 200));
       return createPlainTextResponse(content, mode);
     }
 
@@ -1195,6 +1250,44 @@ function parseAndValidateResponse(content, mode) {
   console.warn('[AI CHAT] parseAndValidateResponse - first 200 chars:', content.substring(0, 200));
   
   return createPlainTextResponse(content, mode);
+}
+
+// Helper function to extract the first complete JSON object using balanced braces
+function extractFirstJsonObject(text) {
+  const firstBraceIndex = text.indexOf('{');
+  if (firstBraceIndex === -1) return null;
+  
+  let braceCount = 0;
+  let jsonEndIndex = -1;
+  
+  for (let i = firstBraceIndex; i < text.length; i++) {
+    const char = text[i];
+    
+    if (char === '{') {
+      braceCount++;
+    } else if (char === '}') {
+      braceCount--;
+      if (braceCount === 0) {
+        jsonEndIndex = i;
+        break;
+      }
+    } else if (char === '"') {
+      // Skip over strings to avoid counting braces inside strings
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === '\\') {
+          i++; // Skip escaped characters
+        }
+        i++;
+      }
+    }
+  }
+  
+  if (jsonEndIndex !== -1) {
+    return text.substring(firstBraceIndex, jsonEndIndex + 1);
+  }
+  
+  return null;
 }
 
 function extractCoreIssueFromText(text) {
