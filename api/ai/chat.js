@@ -58,9 +58,18 @@ const PINNING_SYSTEM_PROMPT = `你是「忧忧」，App「一针 / Stab It」里
 你要帮助用户看到：自己现在可以做一点什么，让未来的结果变好一点。
 
 第三部分：
+
+如果用户没有在对话中明确提出回看时间：
 根据事情严重程度，自然建议一个回看的时间。
+
+如果用户已经在对话中明确提出回看时间：
+必须直接使用用户提出的时间。
+不要重新根据事情严重程度判断。
+不要选择自己的推荐时间。
+
 你可以说：
 "我觉得这件事属于中等程度，不如五天后我们再一起回来看看。"
+
 语气要自然，不要像系统通知。
 
 第四部分：
@@ -102,21 +111,53 @@ const PINNING_SYSTEM_PROMPT = `你是「忧忧」，App「一针 / Stab It」里
 - 害怕被喜欢的人拒绝
 - 工作表现达不到预期
 
-回看时间规则（基于情绪强度和问题类型）：
-- 轻微日常烦躁、小失误、暂时的失落：3天
-- 短期友情或工作误会、考试压力、日常焦虑：5天
-- 中等程度的关系冲突、情侣争吵、朋友矛盾、家庭摩擦：7天
-- 更强烈的关系冲突、被误解、信任受损、反复出现的问题：14天
-- 长期没有解决的痛苦、创伤、重大生活事件、长期悲伤：30天
 
-判断要点：
+回看时间规则：
+
+用户明确提出的回看时间具有最高优先级。
+
+如果用户在对话中明确提出：
+"10天吧"
+"20天后"
+"三天再看看"
+"一个星期后"
+
+必须直接使用用户指定的时间。
+
+此时：
+
+1. analysis.reflectionDays 必须等于用户指定的数字。
+2. 不允许使用之前 pin.reflectionDays 的值。
+3. 不允许重新根据事情严重程度计算天数。
+4. 不允许选择自己的推荐时间。
+5. 不允许优化、缩短、增加用户指定时间。
+
+例如：
+
+之前：
+pin.reflectionDays = 20
+
+用户：
+"10天吧"
+
+正确：
+analysis.reflectionDays = 10
+
+错误：
+analysis.reflectionDays = 20
+错误：
+analysis.reflectionDays = 5
+错误：
+analysis.reflectionDays = 14
+
+只有当用户没有提供明确时间时，才使用以下判断规则：
+
 - 用户只描述情绪（"我很烦""不开心"）但没有具体事件：5天
 - 用户描述具体事件但情绪较轻：3-5天
 - 用户提到争吵、误解、矛盾：7天
 - 用户提到被伤害、背叛、长期痛苦：14天
 - 用户提到分手、亲人离世、重大变故：30天
 - 问题已经持续一段时间仍未解决：增加50%天数
-
 如果用户只说 hello、hi、在吗、你好、我很烦、我不开心，但没有具体事件：
 不要总结核心原因。
 不要建议回看时间。
@@ -160,6 +201,7 @@ readyToPin 和 readyToRemove 必须是 boolean。
 analysis 必须在每次回复中都存在，包含 coreIssue、reflectionDays、warmExplanation 和 currentGuides（3个字符串）。
 即使 readyToPin 为 false，也必须包含 analysis，这样可以在对话过程中逐步完善分析。
 当用户还没有说出具体事件时（readyToPin=false），coreIssue 可以暂时为空字符串，reflectionDays 可以设为 0。
+
 analysis.coreIssue 必须是一个简短的记录标题，保留：
 1. 涉及的人物或关系
 2. 发生的具体冲突
@@ -191,7 +233,11 @@ coreIssue：考试失利后后悔没有更努力
 用户：男朋友觉得我只玩游戏不学习。
 coreIssue：与男友因学习和休息期待不同起冲突
 
-analysis.reflectionDays 选择最短的有用回顾间隔，基于情况、可用行动或用户感受可能实际变化的速度。不要因为用户情绪激动就选择更长的延迟。
+
+analysis.reflectionDays 选择规则：
+
+如果用户没有明确指定时间：
+analysis.reflectionDays 选择最短的有用回顾间隔，基于情况、可用行动或用户感受可能实际变化的速度。
 
 参考范围：
 - 小的日常问题或可能快速变化的感受：1-2天
@@ -204,7 +250,43 @@ analysis.reflectionDays 选择最短的有用回顾间隔，基于情况、可�
 - 用户近期能采取行动时，优先选择较短的一端。
 - 最近与朋友的争吵通常应设为2-4天，而不是自动设为7天。
 - AI可以选择任何正整数；这些是指导范围，不是预设值。
-- reply文本和analysis.reflectionDays必须一致。
+
+时间一致性规则：
+
+在返回 JSON 前，必须检查：
+
+1. 如果用户在当前对话中明确提出了时间：
+analysis.reflectionDays 必须等于用户提出的时间。
+
+2. 如果用户提出了新的时间：
+不能保留旧的 reflectionDays。
+不能参考 pin.reflectionDays。
+不能参考之前 AI 推荐的时间。
+
+3. reply 文本中提到的时间必须和 analysis.reflectionDays 完全一致。
+
+例如：
+
+用户：
+"之前20天，但是10天吧"
+
+正确：
+analysis.reflectionDays = 10
+
+reply：
+应该说"十天后回来看看"
+
+错误：
+analysis.reflectionDays = 20
+
+错误：
+reply说"十天后"
+但是 analysis.reflectionDays = 20
+
+4. 输出前，如果 reply 中出现的回看时间和 analysis.reflectionDays 不一致，必须修改其中一个，使两者一致。
+
+如果用户提到明确的时间（如"15天后"、"一周后"、"两个月后"），优先使用用户指定的时间。
+
 
 好例子：
 
@@ -1202,9 +1284,11 @@ if (isPoorQualityTitle) {
       normalized.analysis.safe = true;
     }
   } else if (mode === 'pinning') {
-    // For pinning mode, always ensure analysis exists
-    normalized.analysis = createFallbackAnalysis(normalized.reply || '');
-    console.log('[AI CHAT] normalizeChatResponse - created fallback analysis for pinning mode');
+    // For pinning mode, ensure analysis exists but preserve AI-generated values
+    if (!normalized.analysis || typeof normalized.analysis !== 'object') {
+      normalized.analysis = createFallbackAnalysis(normalized.reply || '');
+      console.log('[AI CHAT] normalizeChatResponse - created fallback analysis for pinning mode');
+    }
   }
 
   // Normalize review object
@@ -1241,6 +1325,9 @@ if (isPoorQualityTitle) {
       delete normalized.reviewDays;
     }
   }
+
+  // CONSISTENCY VALIDATION: Ensure reply timeline matches analysis.reflectionDays
+  ensureReplyTimelineConsistency(normalized, mode);
 
   return normalized;
 }
@@ -1322,27 +1409,74 @@ function detectReadyToRemoveFromText(text) {
 }
 
 function extractReflectionDaysFromText(text) {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+  
+  // Handle "一周后", "两周后", etc.
+  const weekPattern = /(\d*)\s*周(后|再|回来|看看)/;
+  const weekMatch = text.match(weekPattern);
+  if (weekMatch) {
+    const numStr = weekMatch[1] || '1';
+    const num = parseInt(numStr, 10);
+    if (!isNaN(num) && num >= 1 && num <= 52) {
+      return num * 7;
+    }
+  }
+  
+  // Handle "一个月后", "两个月后", etc.
+  const monthPattern = /(\d*)\s*个?月(后|再|回来|看看)/;
+  const monthMatch = text.match(monthPattern);
+  if (monthMatch) {
+    const numStr = monthMatch[1] || '1';
+    const num = parseInt(numStr, 10);
+    if (!isNaN(num) && num >= 1 && num <= 12) {
+      return num * 30;
+    }
+  }
+  
   const dayPatterns = [
     /(\d+)\s*天(后|再|回来|看看)/,
     /(\d+)\s*(个)?(日|天)/,
-    /(三|五|七|十|十四|三十)\s*天/
+    /([零一二两三四五六七八九十]+)\s*天(后|再|回来|看看)?/
   ];
   
-  const chineseNumMap = {
-    '三': 3,
-    '五': 5,
-    '七': 7,
-    '十': 10,
-    '十四': 14,
-    '三十': 30
-  };
+  // Parse Chinese numerals
+  function parseChineseNumber(chineseNum) {
+    const digitMap = {
+      '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
+      '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
+    };
+    
+    let result = 0;
+    let current = 0;
+    
+    for (const char of chineseNum) {
+      const digit = digitMap[char];
+      if (digit === undefined) return null;
+      
+      if (digit === 10) {
+        if (current === 0) {
+          current = 1;
+        }
+        result += current * 10;
+        current = 0;
+      } else {
+        current = digit;
+      }
+    }
+    
+    result += current;
+    return result;
+  }
   
   for (const pattern of dayPatterns) {
     const match = text.match(pattern);
     if (match) {
       const numStr = match[1];
-      if (chineseNumMap[numStr]) {
-        return chineseNumMap[numStr];
+      const parsed = parseChineseNumber(numStr);
+      if (parsed !== null && parsed > 0 && parsed <= 365) {
+        return parsed;
       }
       const num = parseInt(numStr, 10);
       if (!isNaN(num) && num >= 1 && num <= 365) {
@@ -1352,6 +1486,52 @@ function extractReflectionDaysFromText(text) {
   }
   
   return null;
+}
+
+// Convert number to Chinese numeral
+function numberToChinese(num) {
+  const digits = ['零', '一', '二', '两', '三', '四', '五', '六', '七', '八', '九', '十'];
+  if (num <= 10) return digits[num];
+  if (num < 20) return '十' + (num % 10 === 0 ? '' : digits[num % 10]);
+  const tens = Math.floor(num / 10);
+  const ones = num % 10;
+  return digits[tens] + '十' + (ones === 0 ? '' : digits[ones]);
+}
+
+/**
+ * Ensures reply text timeline matches analysis.reflectionDays
+ * analysis.reflectionDays is the source of truth
+ * Only replaces the numeric part of conflicting timelines in reply text
+ */
+function ensureReplyTimelineConsistency(response, mode) {
+  if (mode !== 'pinning') return response;
+  
+  if (!response.analysis || !response.analysis.reflectionDays || !response.reply) {
+    return response;
+  }
+  
+  const daysInReply = extractReflectionDaysFromText(response.reply);
+  
+  if (daysInReply !== null && daysInReply !== response.analysis.reflectionDays) {
+    console.warn('[AI CHAT] Reply/analysis timeline mismatch:', {
+      replyDays: daysInReply,
+      analysisDays: response.analysis.reflectionDays,
+      replyPreview: response.reply.substring(0, 80)
+    });
+    
+    // Precisely replace only the conflicting timeline number
+    // Support both Arabic (15天) and Chinese (十五天) numerals
+    const daysInReplyChinese = numberToChinese(daysInReply);
+    const analysisDaysChinese = numberToChinese(response.analysis.reflectionDays);
+    
+    // Match either Arabic or Chinese numeral followed by 天 + optional suffix
+    const timelinePattern = new RegExp(`(${daysInReply}|${daysInReplyChinese})\\s*天(后|再|回来|看看)?`, 'g');
+    response.reply = response.reply.replace(timelinePattern, `${analysisDaysChinese}天后`);
+    
+    console.log('[AI CHAT] Corrected reply timeline to:', response.analysis.reflectionDays);
+  }
+  
+  return response;
 }
 
 function parseAndValidateResponse(content, mode) {
@@ -1752,11 +1932,23 @@ export default async function handler(req, res) {
   const { mode, messages, pin } = req.body;
 
   console.log('[AI CHAT] handler called with mode:', mode, 'messages count:', messages.length);
+  
+  // DEBUG STEP 1: At handler start
+  console.log('[DEBUG STEP 1] mode:', mode);
+  console.log('[DEBUG STEP 1] all user messages:', JSON.stringify(messages.filter(m => m.role === 'user').map(m => m.content)));
+  console.log('[DEBUG STEP 1] pin.reflectionDays:', pin?.reflectionDays);
 
   const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin);
+  
+  // DEBUG STEP 2: FULL RAW AI JSON response
+  console.log('[DEBUG STEP 2] FULL RAW AI JSON:', JSON.stringify(result, null, 2));
 
   // Apply repair layer before validation to fix common formatting issues
   const repairedResult = repairChatResponse(result, mode);
+  
+  // DEBUG STEP 2B: After repairChatResponse()
+  console.log('[DEBUG STEP 2B] After repairChatResponse - analysis.reflectionDays:', repairedResult.analysis?.reflectionDays);
+  console.log('[DEBUG STEP 2B] After repairChatResponse - reply:', repairedResult.reply?.substring(0, 100));
 
   if (!validateChatResponse(repairedResult).valid) {
     console.warn('[AI CHAT] First attempt returned invalid response, retrying once');
@@ -1775,6 +1967,36 @@ export default async function handler(req, res) {
   // Use repaired result for final response
   Object.assign(result, repairedResult);
 
+  // USER TIMELINE PRIORITY: Extract explicit timeline from user messages and override AI recommendation
+  if (mode === 'pinning' && result.analysis && result.analysis.reflectionDays) {
+    // DEBUG STEP 3: Before USER TIMELINE PRIORITY override
+    console.log('[DEBUG STEP 3] result.analysis.reflectionDays before override:', result.analysis.reflectionDays);
+    
+    const latestUserMessage = messages
+  .filter(m => m.role === 'user')
+  .at(-1)?.content || '';
+
+console.log('[DEBUG STEP 3] latest user message:', latestUserMessage);
+
+const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
+    console.log('[DEBUG STEP 3] extractReflectionDaysFromText(userMessages):', userTimelineDays);
+    
+    if (userTimelineDays !== null) {
+      console.log('[AI CHAT] User timeline override - AI recommended:', result.analysis.reflectionDays, '-> User specified:', userTimelineDays);
+      result.analysis.reflectionDays = userTimelineDays;
+      
+      // DEBUG STEP 4: Immediately after override
+      console.log('[DEBUG STEP 4] result.analysis.reflectionDays after override:', result.analysis.reflectionDays);
+    }
+  }
+
+  // CONSISTENCY VALIDATION: Ensure reply timeline matches analysis.reflectionDays after user override
+  ensureReplyTimelineConsistency(result, mode);
+
+  // DEBUG STEP 5: Immediately before res.json(result)
+  console.log('[DEBUG STEP 5] final result.analysis.reflectionDays:', result.analysis?.reflectionDays);
+  console.log('[DEBUG STEP 5] final result.reply:', result.reply?.substring(0, 100));
+  
   console.log('[AI CHAT] Final response - provider:', provider, '| usedFallback:', usedFallback);
   res.status(200).json(result);
 }
