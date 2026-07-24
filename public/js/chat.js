@@ -1380,7 +1380,8 @@ function processChatAIResponse(aiResponse) {
           const newCoreIssue = aiResponse.analysis.coreIssue?.trim();
           const isPlaceholder = newCoreIssue === '需要整理的情绪' || 
                                newCoreIssue === '这件事还需要被安放' || 
-                               newCoreIssue === '这段还未完全放下的烦恼';
+                               newCoreIssue === '这段还未完全放下的烦恼' ||
+                               newCoreIssue === '需要回顾的烦恼';
           if (newCoreIssue && (!hadCoreIssue || !isPlaceholder)) {
             targetPin.coreIssue = newCoreIssue;
           }
