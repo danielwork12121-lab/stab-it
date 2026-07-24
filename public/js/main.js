@@ -68,7 +68,8 @@ function restoreAppState() {
 
   if (currentUser.activePinId) {
     const pin = currentUser.painPins?.find(p => p.id === currentUser.activePinId);
-    if (pin && !pin.completed) {
+    // Only restore pinning mode if not already in review mode
+    if (pin && !pin.completed && !currentUser.reviewingPinId) {
       if (DEV_MODE) {
         console.log('[RESTORE DEBUG] Restoring pinning mode for pin:', pin.id);
         console.log('[RESTORE DEBUG] Pin completed:', pin.completed);

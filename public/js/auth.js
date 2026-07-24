@@ -71,10 +71,10 @@ function handleLogin() {
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
   
-  if (DEV_MODE) console.log('[AUTH DEBUG] login button tapped');
-  
-  console.log("login clicked", username, password);
-  console.log("saved users", UserStorage.getUsers());
+  if (DEV_MODE) {
+    console.log('[AUTH DEBUG] login button tapped');
+    console.log('[AUTH DEBUG] login attempt for username:', username);
+  }
   
   if (!username || !password) {
     showAuthMessage('请填写昵称和密码');
@@ -94,7 +94,7 @@ function handleLogin() {
   }
   
   const matchedUser = UserStorage.getUser(username);
-  console.log("login matched user", matchedUser);
+  if (DEV_MODE) console.log('[AUTH DEBUG] login matched user:', matchedUser?.username || 'none');
   
   if (matchedUser && matchedUser.password === password) {
     UserStorage.setCurrentUser(username);
@@ -117,9 +117,10 @@ function handleRegister() {
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
   
-  if (DEV_MODE) console.log('[AUTH DEBUG] register button tapped');
-  
-  console.log("register clicked", username, password);
+  if (DEV_MODE) {
+    console.log('[AUTH DEBUG] register button tapped');
+    console.log('[AUTH DEBUG] register attempt for username:', username);
+  }
   
   if (!username || !password) {
     showAuthMessage('请填写昵称和密码');
@@ -145,7 +146,6 @@ function handleRegister() {
   
   UserStorage.createNewUser(username, password);
   if (DEV_MODE) console.log('[AUTH DEBUG] user saved:', username);
-  console.log("saved users", UserStorage.getUsers());
   showAuthMessage('注册成功，请点击登录进入');
   
   isRegisterMode = false;

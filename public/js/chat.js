@@ -1927,7 +1927,7 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'chat-review-choice-button release';
-  removeBtn.textContent = '取下针';
+  removeBtn.textContent = '我想取下针';
   removeBtn.addEventListener('click', () => {
     if (DEV_MODE) {
       console.log('[CHAT DEBUG] "取下针" clicked');

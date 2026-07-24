@@ -728,14 +728,26 @@ function validateChatResponse(response) {
     return { valid: false, error: `readyToRemove is not a boolean (type: ${typeof response.readyToRemove}, value: ${response.readyToRemove})` };
   }
   
+  // Validate top-level reviewDays field (optional)
+  if (response.reviewDays !== null && response.reviewDays !== undefined) {
+    const reviewDays = parseInt(response.reviewDays);
+    if (isNaN(reviewDays) || reviewDays < 1 || reviewDays > 365) {
+      return { valid: false, error: `reviewDays is not a valid number (type: ${typeof response.reviewDays}, value: ${response.reviewDays})` };
+    }
+  }
+  
   if (response.analysis) {
     const analysis = response.analysis;
     if (typeof analysis !== 'object') {
       return { valid: false, error: `analysis is not an object (type: ${typeof analysis})` };
     }
     
-    if (typeof analysis.coreIssue !== 'string' || !analysis.coreIssue.trim()) {
-      return { valid: false, error: `analysis.coreIssue is not a valid string (type: ${typeof analysis.coreIssue}, value: "${String(analysis.coreIssue || '').substring(0, 50)}")` };
+    // coreIssue can be empty only when readyToPin=false (user hasn't given specific event yet)
+    if (typeof analysis.coreIssue !== 'string') {
+      return { valid: false, error: `analysis.coreIssue is not a string (type: ${typeof analysis.coreIssue})` };
+    }
+    if (response.readyToPin && !analysis.coreIssue.trim()) {
+      return { valid: false, error: `analysis.coreIssue must not be empty when readyToPin=true (value: "${String(analysis.coreIssue || '').substring(0, 50)}")` };
     }
     
     const reflectionDays = parseInt(analysis.reflectionDays);
@@ -747,8 +759,12 @@ function validateChatResponse(response) {
       return { valid: false, error: `analysis.warmExplanation is not a string (type: ${typeof analysis.warmExplanation})` };
     }
     
-    if (!Array.isArray(analysis.currentGuides) || analysis.currentGuides.length !== 3) {
-      return { valid: false, error: `analysis.currentGuides is not an array of 3 elements (type: ${typeof analysis.currentGuides}, length: ${Array.isArray(analysis.currentGuides) ? analysis.currentGuides.length : 'N/A'})` };
+    // currentGuides must be array of 0-3 strings (repair layer will pad to 3)
+    if (!Array.isArray(analysis.currentGuides)) {
+      return { valid: false, error: `analysis.currentGuides is not an array (type: ${typeof analysis.currentGuides})` };
+    }
+    if (analysis.currentGuides.length > 3) {
+      return { valid: false, error: `analysis.currentGuides has more than 3 elements (length: ${analysis.currentGuides.length})` };
     }
     
     for (let i = 0; i < analysis.currentGuides.length; i++) {
@@ -772,8 +788,21 @@ function validateChatResponse(response) {
       return { valid: false, error: `review.stillAffectsUser is not a boolean (type: ${typeof review.stillAffectsUser}, value: ${review.stillAffectsUser})` };
     }
     
+    // stillAffectsUser should be false when readyToRemove=true
+    if (response.readyToRemove && review.stillAffectsUser) {
+      return { valid: false, error: `review.stillAffectsUser must be false when readyToRemove=true` };
+    }
+    if (!response.readyToRemove && !review.stillAffectsUser && review.reasonCategory !== 'ready_to_release') {
+      return { valid: false, error: `review.stillAffectsUser must be true when readyToRemove=false and reasonCategory is not ready_to_release` };
+    }
+    
     if (typeof review.reasonCategory !== 'string' || !VALID_REASON_CATEGORIES.includes(review.reasonCategory)) {
       return { valid: false, error: `review.reasonCategory is invalid (value: "${review.reasonCategory}", valid options: ${VALID_REASON_CATEGORIES.join(', ')})` };
+    }
+    
+    // reasonCategory must be "ready_to_release" when readyToRemove=true
+    if (response.readyToRemove && review.reasonCategory !== 'ready_to_release') {
+      return { valid: false, error: `review.reasonCategory must be "ready_to_release" when readyToRemove=true (value: "${review.reasonCategory}")` };
     }
     
     if (review.nextReflectionDays !== null) {
@@ -781,6 +810,11 @@ function validateChatResponse(response) {
       if (isNaN(nextDays) || nextDays < 1 || nextDays > 365) {
         return { valid: false, error: `review.nextReflectionDays is not a valid number (type: ${typeof review.nextReflectionDays}, value: ${review.nextReflectionDays})` };
       }
+    }
+    
+    // nextReflectionDays must be null when readyToRemove=true
+    if (response.readyToRemove && review.nextReflectionDays !== null) {
+      return { valid: false, error: `review.nextReflectionDays must be null when readyToRemove=true (value: ${review.nextReflectionDays})` };
     }
   }
   
@@ -968,6 +1002,132 @@ function createFallbackAnalysis(reply) {
     warmExplanation: extractWarmExplanationFromText(reply),
     currentGuides: extractGuidesFromText(reply)
   };
+}
+
+/**
+ * Repair slightly malformed AI responses before validation.
+ * This layer safely fixes common AI output issues without bypassing validation.
+ */
+function repairChatResponse(response, mode) {
+  if (!response || typeof response !== 'object') {
+    return response;
+  }
+
+  const repaired = { ...response };
+
+  // Repair reply
+  if (typeof repaired.reply !== 'string' || !repaired.reply.trim()) {
+    repaired.reply = '我理解你的感受，让我陪你一起看看这件事。';
+  }
+
+  // Repair boolean fields
+  if (typeof repaired.readyToPin !== 'boolean') {
+    repaired.readyToPin = false;
+  }
+  if (typeof repaired.readyToRemove !== 'boolean') {
+    repaired.readyToRemove = false;
+  }
+
+  // Repair analysis object for pinning mode
+  if (mode === 'pinning') {
+    if (!repaired.analysis || typeof repaired.analysis !== 'object') {
+      repaired.analysis = createFallbackAnalysis(repaired.reply || '');
+    } else {
+      repaired.analysis = { ...repaired.analysis };
+
+      // Repair coreIssue - allow empty when readyToPin=false (user hasn't given specific event)
+      if (typeof repaired.analysis.coreIssue !== 'string') {
+        repaired.analysis.coreIssue = '';
+      }
+      if (repaired.readyToPin && !repaired.analysis.coreIssue.trim()) {
+        repaired.analysis.coreIssue = '需要回顾的烦恼';
+      }
+
+      // Repair reflectionDays - handle string values like "5天"
+      if (repaired.analysis.reflectionDays !== null && repaired.analysis.reflectionDays !== undefined) {
+        let days = parseInt(repaired.analysis.reflectionDays, 10);
+        if (isNaN(days)) {
+          // Try to extract number from text like "5天"
+          const textMatch = String(repaired.analysis.reflectionDays).match(/(\d+)/);
+          days = textMatch ? parseInt(textMatch[1], 10) : 5;
+        }
+        repaired.analysis.reflectionDays = Math.max(1, Math.min(365, days));
+      } else {
+        repaired.analysis.reflectionDays = 5;
+      }
+
+      // Repair warmExplanation
+      if (typeof repaired.analysis.warmExplanation !== 'string') {
+        repaired.analysis.warmExplanation = '';
+      }
+
+      // Repair currentGuides - allow 0-3 elements, pad to 3
+      if (!Array.isArray(repaired.analysis.currentGuides)) {
+        repaired.analysis.currentGuides = ['', '', ''];
+      } else {
+        repaired.analysis.currentGuides = repaired.analysis.currentGuides.slice(0, 3);
+        while (repaired.analysis.currentGuides.length < 3) {
+          repaired.analysis.currentGuides.push('');
+        }
+      }
+
+      // Repair safe flag
+      if (typeof repaired.analysis.safe !== 'boolean') {
+        repaired.analysis.safe = true;
+      }
+    }
+  }
+
+  // Repair review object for review mode
+  if (mode === 'review') {
+    if (!repaired.review || typeof repaired.review !== 'object') {
+      repaired.review = {
+        stillAffectsUser: true,
+        reasonCategory: 'unclear',
+        nextReflectionDays: null
+      };
+    } else {
+      repaired.review = { ...repaired.review };
+
+      // Repair stillAffectsUser - must be false when readyToRemove=true
+      if (typeof repaired.review.stillAffectsUser !== 'boolean') {
+        repaired.review.stillAffectsUser = !repaired.readyToRemove;
+      }
+      // Enforce consistency: stillAffectsUser must be false when readyToRemove=true
+      if (repaired.readyToRemove) {
+        repaired.review.stillAffectsUser = false;
+      }
+
+      // Repair reasonCategory - must be one of the valid values
+      if (typeof repaired.review.reasonCategory !== 'string' || !VALID_REASON_CATEGORIES.includes(repaired.review.reasonCategory)) {
+        repaired.review.reasonCategory = repaired.readyToRemove ? 'ready_to_release' : 'unclear';
+      }
+      // Enforce consistency: reasonCategory must be "ready_to_release" when readyToRemove=true
+      if (repaired.readyToRemove) {
+        repaired.review.reasonCategory = 'ready_to_release';
+      }
+
+      // Repair nextReflectionDays - handle string values like "5天"
+      // nextReflectionDays must be null when readyToRemove=true
+      if (repaired.readyToRemove) {
+        repaired.review.nextReflectionDays = null;
+      } else if (repaired.review.nextReflectionDays !== null && repaired.review.nextReflectionDays !== undefined) {
+        let days = parseInt(repaired.review.nextReflectionDays, 10);
+        if (isNaN(days)) {
+          // Try to extract number from text like "5天"
+          const textMatch = String(repaired.review.nextReflectionDays).match(/(\d+)/);
+          days = textMatch ? parseInt(textMatch[1], 10) : null;
+        }
+        if (days === null || days < 1 || days > 365) {
+          repaired.review.nextReflectionDays = null;
+        } else {
+          repaired.review.nextReflectionDays = days;
+        }
+      }
+    }
+  }
+
+  return repaired;
 }
 
 function normalizeChatResponse(parsed, mode) {
@@ -1234,10 +1394,13 @@ function parseAndValidateResponse(content, mode) {
 
     const normalized = normalizeChatResponse(parsed, mode);
 
-    const validationResult = validateChatResponse(normalized);
+    // Repair slightly malformed responses before validation
+    const repaired = repairChatResponse(normalized, mode);
+
+    const validationResult = validateChatResponse(repaired);
     if (validationResult.valid) {
       console.log('[AI CHAT] JSON validated successfully');
-      return normalized;
+      return repaired;
     }
 
     console.warn('[AI CHAT] parseAndValidateResponse - validation failed:', validationResult.error);
@@ -1595,27 +1758,25 @@ export default async function handler(req, res) {
 
   const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin);
 
-  if (!validateChatResponse(result).valid) {
+  // Apply repair layer before validation to fix common formatting issues
+  const repairedResult = repairChatResponse(result, mode);
+
+  if (!validateChatResponse(repairedResult).valid) {
     console.warn('[AI CHAT] First attempt returned invalid response, retrying once');
     const retryResult = await callAIChatWithFallback(mode, messages, pin);
-    if (validateChatResponse(retryResult.result).valid) {
-      Object.assign(result, retryResult.result);
+    const repairedRetry = repairChatResponse(retryResult.result, mode);
+    if (validateChatResponse(repairedRetry).valid) {
+      Object.assign(repairedResult, repairedRetry);
     }
   }
 
-  if (!validateChatResponse(result).valid) {
+  if (!validateChatResponse(repairedResult).valid) {
     console.warn('[AI CHAT] Retry also failed, using fallback');
-    Object.assign(result, fallbackResponseForReason(mode, 'retry_failed'));
+    Object.assign(repairedResult, fallbackResponseForReason(mode, 'retry_failed'));
   }
 
-  if (result.review) {
-    if (typeof result.review.nextReflectionDays === 'string') {
-      const parsedDays = parseInt(result.review.nextReflectionDays);
-      if (!isNaN(parsedDays)) {
-        result.review.nextReflectionDays = parsedDays;
-      }
-    }
-  }
+  // Use repaired result for final response
+  Object.assign(result, repairedResult);
 
   console.log('[AI CHAT] Final response - provider:', provider, '| usedFallback:', usedFallback);
   res.status(200).json(result);
