@@ -177,37 +177,65 @@ readyToPin 必须是 true。
 
 输出要求：
 
-你必须只返回合法 JSON。
-不要返回 JSON 外的任何文字。
+你必须调用 submit_pinning_response 函数来返回完整回复。
+不要直接输出普通文本。
 不要返回 Markdown。
 不要解释你的思考过程。
 
-格式必须完全如下：
+函数参数说明：
+- reply: 完整的中文回复内容
+- readyToPin: 是否准备好扎针
+- readyToRemove: 是否准备好取下针（pinning模式通常为false）
+- coreIssue: 具体记录标题，信息不足时为空字符串
+- reflectionDays: 回看天数（整数）
+- warmExplanation: 一句简短温柔的中文安慰
+- currentGuides: 包含3个字符串的引导数组
 
-{
-  "reply": "中文回复",
-  "readyToPin": false,
-  "readyToRemove": false,
-  "analysis": {
-    "safe": true,
-    "coreIssue": "尽量少于 20 个中文字符",
-    "reflectionDays": 5,
-    "warmExplanation": "一句简短温柔的中文安慰",
-    "currentGuides": ["第一句小引导", "第二句小引导", "第三句小引导"]
-  }
-}
+reflectionDays 规则：
+如果用户提到明确的时间（如"15天后"、"一周后"、"两个月后"），优先使用用户指定的时间。
+reply文本和reflectionDays必须一致。
 
-readyToPin 和 readyToRemove 必须是 boolean。
-analysis 必须在每次回复中都存在，包含 coreIssue、reflectionDays、warmExplanation 和 currentGuides（3个字符串）。
-即使 readyToPin 为 false，也必须包含 analysis，这样可以在对话过程中逐步完善分析。
-当用户还没有说出具体事件时（readyToPin=false），coreIssue 可以暂时为空字符串，reflectionDays 可以设为 0。
+但是：
+coreIssue 是一个逐步完善的记录标题，不需要在每一次回复中强制重新生成。
 
-analysis.coreIssue 必须是一个简短的记录标题，保留：
-1. 涉及的人物或关系
-2. 发生的具体冲突
-3. 用户当前卡住的点
+如果当前对话已经有足够信息理解用户的问题：
+- 返回一个具体、准确的 coreIssue。
+- coreIssue 应该代表这件烦恼长期回看时最有价值的标题。
 
-首选结构："人物/关系 + 事件 + 当前卡点"
+如果当前信息不足，或者无法确定更准确的核心问题：
+- coreIssue 返回空字符串 ""。
+- 不要生成模糊标题。
+- 不要使用类似"需要回顾的烦恼"、"未解决的问题"、"这段烦恼"等泛化描述。
+
+coreIssue 不应该为了满足格式而猜测。
+准确性优先于完整性。
+
+analysis.coreIssue 应满足：
+
+1. 是一个简短的记录标题，而不是回复内容。
+2. 保留：
+   - 涉及的人物或关系
+   - 发生的具体冲突
+   - 用户当前卡住的点
+
+首选结构：
+"人物/关系 + 事件 + 当前卡点"
+
+例如：
+正确：
+- 考试后担心努力没有结果
+- 朋友不回消息后担心关系疏远
+- 与男友因学习期待不同起冲突
+
+错误：
+- 需要回顾的烦恼
+- 复杂的情绪问题
+- 感觉很难受
+- 用户的问题
+
+如果之前已经形成了明确的 coreIssue：
+不要因为新的回复信息较少而生成新的模糊 coreIssue。
+保持已有核心理解的一致性比每次重新命名更重要。
 
 必须满足：
 - 让用户以后能立刻认出确切问题
@@ -1118,12 +1146,12 @@ function repairChatResponse(response, mode) {
       repaired.analysis = { ...repaired.analysis };
 
       // Repair coreIssue - allow empty when readyToPin=false (user hasn't given specific event)
+      // Do NOT assign generic placeholders - let validation fail and retry/preserve previous
       if (typeof repaired.analysis.coreIssue !== 'string') {
         repaired.analysis.coreIssue = '';
       }
-      if (repaired.readyToPin && !repaired.analysis.coreIssue.trim()) {
-        repaired.analysis.coreIssue = '需要回顾的烦恼';
-      }
+      // If readyToPin=true and coreIssue is unusable, leave it empty
+      // The handler will handle preservation or retry
 
       // Repair reflectionDays - handle string values like "5天"
       if (repaired.analysis.reflectionDays !== null && repaired.analysis.reflectionDays !== undefined) {
@@ -1408,6 +1436,132 @@ function detectReadyToRemoveFromText(text) {
   return false;
 }
 
+/**
+ * Checks if a coreIssue is usable (not null, empty, or generic placeholder)
+ * Unusable values should not overwrite a previously stored valid coreIssue
+ */
+function isUsableCoreIssue(coreIssue) {
+  if (!coreIssue || typeof coreIssue !== 'string') {
+    return false;
+  }
+  
+  const trimmed = coreIssue.trim();
+  if (!trimmed) {
+    return false;
+  }
+  
+  const GENERIC_PLACEHOLDERS = [
+    '需要整理的情绪',
+    '这件事还需要被安放',
+    '这段还未完全放下的烦恼',
+    '需要回顾的烦恼'
+  ];
+  
+  if (GENERIC_PLACEHOLDERS.includes(trimmed)) {
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Parses tagged pinning response format
+ * Format:
+ * <REPLY>
+ * 完整中文回复
+ * </REPLY>
+ * <READY_TO_PIN>
+ * true
+ * </READY_TO_PIN>
+ * <READY_TO_REMOVE>
+ * false
+ * </READY_TO_REMOVE>
+ * <CORE_ISSUE>
+ * 具体记录标题
+ * </CORE_ISSUE>
+ * <REFLECTION_DAYS>
+ * 4
+ * </REFLECTION_DAYS>
+ * <WARM_EXPLANATION>
+ * 一句简短温柔解释
+ * </WARM_EXPLANATION>
+ * <GUIDE_1>
+ * 第一句引导
+ * </GUIDE_1>
+ * <GUIDE_2>
+ * 第二句引导
+ * </GUIDE_2>
+ * <GUIDE_3>
+ * 第三句引导
+ * </GUIDE_3>
+ */
+function parseTaggedPinningResponse(content) {
+  if (!content || typeof content !== 'string') {
+    return null;
+  }
+  
+  const tags = {
+    REPLY: null,
+    READY_TO_PIN: null,
+    READY_TO_REMOVE: null,
+    CORE_ISSUE: null,
+    REFLECTION_DAYS: null,
+    WARM_EXPLANATION: null,
+    GUIDE_1: null,
+    GUIDE_2: null,
+    GUIDE_3: null
+  };
+  
+  for (const tagName of Object.keys(tags)) {
+    const openingTag = `<${tagName}>`;
+    const closingTag = `</${tagName}>`;
+    
+    const startIndex = content.indexOf(openingTag);
+    if (startIndex === -1) continue;
+    
+    const endIndex = content.indexOf(closingTag, startIndex + openingTag.length);
+    if (endIndex === -1) continue;
+    
+    const value = content.substring(startIndex + openingTag.length, endIndex).trim();
+    tags[tagName] = value;
+  }
+  
+  // Check if this is a valid tagged response (at least REPLY must be present)
+  if (!tags.REPLY) {
+    return null;
+  }
+  
+  // Parse boolean values
+  const readyToPin = tags.READY_TO_PIN === 'true';
+  const readyToRemove = tags.READY_TO_REMOVE === 'true';
+  
+  // Parse reflectionDays
+  const reflectionDays = parseInt(tags.REFLECTION_DAYS, 10);
+  const parsedReflectionDays = (!isNaN(reflectionDays) && reflectionDays >= 0 && reflectionDays <= 365) 
+    ? reflectionDays 
+    : null;
+  
+  // Build analysis object
+  const analysis = {
+    safe: true,
+    coreIssue: tags.CORE_ISSUE || '',
+    reflectionDays: parsedReflectionDays || 5,
+    warmExplanation: tags.WARM_EXPLANATION || '',
+    currentGuides: [
+      tags.GUIDE_1 || '',
+      tags.GUIDE_2 || '',
+      tags.GUIDE_3 || ''
+    ].filter(Boolean)
+  };
+  
+  return {
+    reply: tags.REPLY,
+    readyToPin,
+    readyToRemove,
+    analysis
+  };
+}
+
 function extractReflectionDaysFromText(text) {
   if (!text || typeof text !== 'string') {
     return null;
@@ -1541,6 +1695,28 @@ function parseAndValidateResponse(content, mode) {
   }
   
   let cleanContent = content.trim();
+  
+  // PINNING MODE: First try tagged format parsing
+  if (mode === 'pinning') {
+    const taggedResponse = parseTaggedPinningResponse(cleanContent);
+    if (taggedResponse) {
+      console.log('[AI CHAT] parseAndValidateResponse - tagged format detected for pinning');
+      
+      const normalized = normalizeChatResponse(taggedResponse, mode);
+      const repaired = repairChatResponse(normalized, mode);
+      const validationResult = validateChatResponse(repaired);
+      
+      if (validationResult.valid) {
+        console.log('[AI CHAT] Tagged pinning response validated successfully');
+        return repaired;
+      }
+      
+      console.warn('[AI CHAT] parseAndValidateResponse - tagged response validation failed:', validationResult.error);
+      // Continue to JSON parsing as fallback
+    } else {
+      console.log('[AI CHAT] parseAndValidateResponse - no tagged format detected for pinning, trying JSON');
+    }
+  }
   
   // Handle escaped JSON strings (e.g., "{\"reply\":\"text\"}")
   if (cleanContent.startsWith('"') && cleanContent.endsWith('"')) {
@@ -1764,6 +1940,127 @@ function createPlainTextResponse(content, mode) {
   return response;
 }
 
+// MiniMax function calling tool definition for pinning mode
+const MINIMAX_PINNING_TOOL = {
+  name: 'submit_pinning_response',
+  description: 'Return the complete StabIt pinning reply and structured analysis. For pinning mode, always call this function instead of responding with ordinary text.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reply: {
+        type: 'string',
+        description: 'The complete natural Chinese reply shown to the user.'
+      },
+      readyToPin: {
+        type: 'boolean'
+      },
+      readyToRemove: {
+        type: 'boolean'
+      },
+      coreIssue: {
+        type: 'string',
+        description: 'Specific record title. Empty only when no concrete event has been provided.'
+      },
+      reflectionDays: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 365
+      },
+      warmExplanation: {
+        type: 'string'
+      },
+      currentGuides: {
+        type: 'array',
+        items: { type: 'string' },
+        minItems: 3,
+        maxItems: 3
+      }
+    },
+    required: [
+      'reply',
+      'readyToPin',
+      'readyToRemove',
+      'coreIssue',
+      'reflectionDays',
+      'warmExplanation',
+      'currentGuides'
+    ],
+    additionalProperties: false
+  }
+};
+
+/**
+ * Parses MiniMax tool call response for pinning mode
+ * Extracts function arguments from choices[0].message.tool_calls[0].function.arguments
+ * Returns the standard response shape or null if no valid tool call
+ */
+function parseToolCallPinningResponse(data) {
+  if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+    return null;
+  }
+  
+  const message = data.choices[0]?.message;
+  if (!message || !message.tool_calls || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
+    return null;
+  }
+  
+  const toolCall = message.tool_calls[0];
+  if (!toolCall?.function?.arguments) {
+    return null;
+  }
+  
+  console.log('[MINIMAX TOOL CALL] Tool call received:', toolCall.function.name);
+  
+  let args;
+  try {
+    args = JSON.parse(toolCall.function.arguments);
+  } catch (e) {
+    console.warn('[MINIMAX TOOL CALL] Failed to parse function arguments:', e.message);
+    return null;
+  }
+  
+  console.log('[MINIMAX TOOL CALL] Parsed function arguments:', JSON.stringify(args).substring(0, 300));
+  
+  // Validate required fields
+  if (typeof args.reply !== 'string' || !args.reply.trim()) {
+    console.warn('[MINIMAX TOOL CALL] Missing or empty reply');
+    return null;
+  }
+  
+  if (typeof args.readyToPin !== 'boolean' || typeof args.readyToRemove !== 'boolean') {
+    console.warn('[MINIMAX TOOL CALL] Booleans missing or wrong type');
+    return null;
+  }
+  
+  const reflectionDays = parseInt(args.reflectionDays, 10);
+  if (isNaN(reflectionDays) || reflectionDays < 0 || reflectionDays > 365) {
+    console.warn('[MINIMAX TOOL CALL] Invalid reflectionDays:', args.reflectionDays);
+    return null;
+  }
+  
+  if (!Array.isArray(args.currentGuides) || args.currentGuides.length !== 3) {
+    console.warn('[MINIMAX TOOL CALL] currentGuides must have exactly 3 items, got:', args.currentGuides?.length);
+    return null;
+  }
+  
+  // Build the standard response shape
+  const response = {
+    reply: args.reply,
+    readyToPin: args.readyToPin,
+    readyToRemove: args.readyToRemove,
+    analysis: {
+      safe: true,
+      coreIssue: typeof args.coreIssue === 'string' ? args.coreIssue : '',
+      reflectionDays: reflectionDays,
+      warmExplanation: typeof args.warmExplanation === 'string' ? args.warmExplanation : '',
+      currentGuides: args.currentGuides.filter(g => typeof g === 'string')
+    }
+  };
+  
+  console.log('[MINIMAX TOOL CALL] Successfully parsed tool call response');
+  return response;
+}
+
 function buildMinimaxChatBody(modelId, mode, messages, pin) {
   const systemPrompt = mode === 'review' ? REVIEW_SYSTEM_PROMPT : PINNING_SYSTEM_PROMPT;
   const systemMessage = {
@@ -1782,11 +2079,26 @@ function buildMinimaxChatBody(modelId, mode, messages, pin) {
   }
   allMessages.push(...messages);
 
-  return {
+  const body = {
     model: modelId,
     messages: allMessages,
     temperature: 0.4
   };
+
+  // For pinning mode, add function calling tool
+  if (mode === 'pinning') {
+    body.tools = [{
+      type: 'function',
+      function: {
+        name: MINIMAX_PINNING_TOOL.name,
+        description: MINIMAX_PINNING_TOOL.description,
+        parameters: MINIMAX_PINNING_TOOL.parameters
+      }
+    }];
+    body.tool_choice = 'auto';
+  }
+
+  return body;
 }
 
 function getMinimaxApiKey() {
@@ -1847,6 +2159,49 @@ async function callMinimaxChat(mode, messages, pin) {
 
     const data = await response.json();
 
+    // PINNING MODE: Check for tool call first
+    if (mode === 'pinning') {
+      const toolCallResponse = parseToolCallPinningResponse(data);
+      
+      if (toolCallResponse) {
+        console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+        return toolCallResponse;
+      }
+      
+      // No tool call found - retry once with tool-only reminder
+      console.warn('[MINIMAX CHAT] No tool call in pinning response, retrying with reminder');
+      
+      const retryBody = buildMinimaxChatBody(modelId, mode, messages, pin);
+      // Add reminder as the last user message
+      retryBody.messages.push({
+        role: 'user',
+        content: '必须调用 submit_pinning_response。不要直接输出普通文本。'
+      });
+      
+      const retryResponse = await fetch(`${apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(retryBody),
+        signal: controller.signal
+      });
+      
+      if (retryResponse.ok) {
+        const retryData = await retryResponse.json();
+        const retryToolCallResponse = parseToolCallPinningResponse(retryData);
+        
+        if (retryToolCallResponse) {
+          console.log('[MINIMAX CHAT] Retry succeeded with tool call. Elapsed:', Date.now() - startTime, 'ms');
+          return retryToolCallResponse;
+        }
+        
+        console.warn('[MINIMAX CHAT] Retry also failed to produce tool call, falling back to content parsing');
+      }
+    }
+
+    // Fall back to content parsing (tagged/JSON/plain-text)
     const content = data.choices?.[0]?.message?.content;
     if (!content) {
       console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
@@ -1987,6 +2342,27 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
       
       // DEBUG STEP 4: Immediately after override
       console.log('[DEBUG STEP 4] result.analysis.reflectionDays after override:', result.analysis.reflectionDays);
+    }
+  }
+
+  // CORE ISSUE STABILITY: Preserve previous valid coreIssue when new one is unusable
+  if (mode === 'pinning' && result.analysis) {
+    const newCoreIssue = result.analysis.coreIssue;
+    
+    // Check if new coreIssue is unusable
+    if (!isUsableCoreIssue(newCoreIssue)) {
+      // Look for previous usable coreIssue
+      const previousCoreIssue = pin?.coreIssue || pin?.aiResult?.coreIssue;
+      
+      if (isUsableCoreIssue(previousCoreIssue)) {
+        console.log('[AI CHAT] Preserving previous coreIssue:', previousCoreIssue, '(new was unusable)');
+        result.analysis.coreIssue = previousCoreIssue;
+      } else if (result.readyToPin) {
+        // No previous valid title and readyToPin=true with unusable title
+        // Set readyToPin=false to prevent creating a bad pin
+        console.log('[AI CHAT] No valid coreIssue available, setting readyToPin=false');
+        result.readyToPin = false;
+      }
     }
   }
 

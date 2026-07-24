@@ -1375,16 +1375,22 @@ function processChatAIResponse(aiResponse) {
           const hadCoreIssue = targetPin.coreIssue && targetPin.coreIssue.trim();
 
           // Update coreIssue if:
-          // 1. The new value is not empty, AND
-          // 2. Either the pin doesn't have an existing coreIssue, OR the new value is not a generic placeholder
+          // 1. The new value is usable (not null, empty, or generic placeholder)
+          // 2. Either the pin doesn't have an existing coreIssue, OR the new value is usable
           const newCoreIssue = aiResponse.analysis.coreIssue?.trim();
           const isPlaceholder = newCoreIssue === '需要整理的情绪' || 
                                newCoreIssue === '这件事还需要被安放' || 
                                newCoreIssue === '这段还未完全放下的烦恼' ||
                                newCoreIssue === '需要回顾的烦恼';
-          if (newCoreIssue && (!hadCoreIssue || !isPlaceholder)) {
+          const isNewUsable = newCoreIssue && !isPlaceholder;
+          
+          if (isNewUsable) {
             targetPin.coreIssue = newCoreIssue;
+          } else if (!hadCoreIssue && !isNewUsable) {
+            // No existing coreIssue and new one is unusable - leave empty for backend to handle
+            targetPin.coreIssue = '';
           }
+          // If hadCoreIssue and new is unusable - preserve existing
 
           // Always update reflectionDays if valid
           if (aiResponse.analysis.reflectionDays > 0) {
@@ -1393,7 +1399,14 @@ function processChatAIResponse(aiResponse) {
 
           targetPin.warmExplanation = aiResponse.analysis.warmExplanation;
           targetPin.currentGuides = aiResponse.analysis.currentGuides;
-          targetPin.aiResult = aiResponse.analysis;
+          
+          // Preserve old aiResult.coreIssue when new one is unusable
+          const updatedAiResult = { ...aiResponse.analysis };
+          if (!isNewUsable && hadCoreIssue) {
+            updatedAiResult.coreIssue = targetPin.coreIssue;
+          }
+          targetPin.aiResult = updatedAiResult;
+          
           targetPin.aiAnalyzedAt = Date.now();
           targetPin.reviewReadyAfterDays = aiResponse.analysis.reflectionDays;
           targetPin.aiAnalyzed = true;
