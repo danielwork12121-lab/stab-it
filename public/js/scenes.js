@@ -260,7 +260,8 @@ function showReviewPanel(targetPinId = null) {
   const hasValidCoreIssue = targetNeedle.coreIssue &&
                             targetNeedle.coreIssue.trim() &&
                             targetNeedle.coreIssue !== '需要整理的情绪' &&
-                            targetNeedle.coreIssue !== '这件事还需要被安放';
+                            targetNeedle.coreIssue !== '这件事还需要被安放' &&
+                            targetNeedle.coreIssue !== '这段还未完全放下的烦恼';
 
   // Determine initial issueText immediately (before any async operations)
   let issueText = '';
@@ -272,7 +273,7 @@ function showReviewPanel(targetPinId = null) {
     issueText = targetNeedle.coreIssue.trim();
     titleSource = 'pin.coreIssue';
     if (DEV_MODE) console.log('[TITLE DEBUG] review title source: stored coreIssue');
-  } else if (targetNeedle.aiResult && targetNeedle.aiResult.coreIssue && targetNeedle.aiResult.coreIssue.trim() && targetNeedle.aiResult.coreIssue !== '需要整理的情绪' && targetNeedle.aiResult.coreIssue !== '这件事还需要被安放') {
+  } else if (targetNeedle.aiResult && targetNeedle.aiResult.coreIssue && targetNeedle.aiResult.coreIssue.trim() && targetNeedle.aiResult.coreIssue !== '需要整理的情绪' && targetNeedle.aiResult.coreIssue !== '这件事还需要被安放' && targetNeedle.aiResult.coreIssue !== '这段还未完全放下的烦恼') {
     issueText = targetNeedle.aiResult.coreIssue.trim();
     titleSource = 'aiResult.coreIssue';
     if (DEV_MODE) console.log('[TITLE DEBUG] summary source: pin.aiResult.coreIssue');

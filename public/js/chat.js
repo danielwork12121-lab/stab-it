@@ -1378,7 +1378,9 @@ function processChatAIResponse(aiResponse) {
           // 1. The new value is not empty, AND
           // 2. Either the pin doesn't have an existing coreIssue, OR the new value is not a generic placeholder
           const newCoreIssue = aiResponse.analysis.coreIssue?.trim();
-          const isPlaceholder = newCoreIssue === '需要整理的情绪' || newCoreIssue === '这件事还需要被安放';
+          const isPlaceholder = newCoreIssue === '需要整理的情绪' || 
+                               newCoreIssue === '这件事还需要被安放' || 
+                               newCoreIssue === '这段还未完全放下的烦恼';
           if (newCoreIssue && (!hadCoreIssue || !isPlaceholder)) {
             targetPin.coreIssue = newCoreIssue;
           }

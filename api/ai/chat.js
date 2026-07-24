@@ -1016,8 +1016,7 @@ if (isPoorQualityTitle) {
     normalized.analysis.coreIssue
   );
 
-  normalized.analysis.coreIssue =
-    normalized.analysis.coreIssue || '这段还未完全放下的烦恼';
+  normalized.analysis.coreIssue = null;
 }
     // Convert reflectionDays to number if it's a string
     if (normalized.analysis.reflectionDays !== null && normalized.analysis.reflectionDays !== undefined) {
@@ -1292,7 +1291,7 @@ function extractFirstJsonObject(text) {
 
 function extractCoreIssueFromText(text) {
   if (!text || typeof text !== 'string') {
-    return '这段还未完全放下的烦恼';
+    return null;
   }
   
   // Only extract a title when the text contains an explicit short title marker
@@ -1316,9 +1315,9 @@ function extractCoreIssueFromText(text) {
     }
   }
   
-  // If no explicit title marker found or candidate is invalid, return safe fallback
+  // If no explicit title marker found or candidate is invalid, return null
   // Do NOT extract from regular sentences - this produces poor quality truncated titles
-  return '这段还未完全放下的烦恼';
+  return null;
 }
 
 function extractGuidesFromText(text) {
