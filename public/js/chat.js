@@ -1429,7 +1429,7 @@ function processChatAIResponse(aiResponse) {
 
   if (mode === 'pinning') {
     if (DEV_MODE) {
-      console.log('[AI RESPONSE DEBUG] showing "交给忧忧" button (always visible in pinning mode)');
+      console.log('[AI RESPONSE DEBUG] showing pin creation decision buttons');
       console.log('[PIN ANALYSIS DEBUG] no secondary analyze-worry request');
     }
 
@@ -1440,14 +1440,9 @@ function processChatAIResponse(aiResponse) {
     }
 
     setTimeout(() => {
-      addActionButton('交给忧忧', () => {
-        if (currentUser) {
-          currentUser.pendingAction = null;
-          UserStorage.updateUser(currentUser);
-          UserStorage.setCurrentUser(currentUser.username);
-        }
-        beginPinCeremony();
-      });
+      // DEBUG STEP 6: Log reflectionDays passed to addPinCreationChoiceButtons
+      console.log('[DEBUG STEP 6] reflectionDays passed to addPinCreationChoiceButtons:', aiResponse.analysis?.reflectionDays);
+      addPinCreationChoiceButtons(aiResponse.analysis?.reflectionDays);
     }, 300);
   }
 
@@ -1912,6 +1907,53 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
 }
 window.addReviewChoiceButtons = addReviewChoiceButtons;
 window.analyzeWorryWithAI = analyzeWorryWithAI;
+
+function addPinCreationChoiceButtons(reflectionDays) {
+  const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
+  existingButtons.forEach(btn => btn.remove());
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'chat-review-choice-wrapper two-actions';
+
+  const continueBtn = document.createElement('button');
+  continueBtn.className = 'chat-review-choice-button';
+  continueBtn.textContent = '继续聊';
+  continueBtn.addEventListener('click', () => {
+    const existingButtons = chatLog.querySelectorAll('.chat-review-choice-button');
+    existingButtons.forEach(btn => btn.remove());
+
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      currentUser.pendingAction = null;
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+    }
+  });
+
+  const days = (typeof reflectionDays === 'number' && reflectionDays > 0) ? reflectionDays : 5;
+  
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'chat-review-choice-button release';
+  pinBtn.textContent = `交给悠悠，${days}天后再看看`;
+  pinBtn.addEventListener('click', () => {
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      currentUser.pendingAction = null;
+      UserStorage.updateUser(currentUser);
+      UserStorage.setCurrentUser(currentUser.username);
+    }
+    beginPinCeremony();
+  });
+
+  wrapper.appendChild(continueBtn);
+  wrapper.appendChild(pinBtn);
+
+  chatLog.appendChild(wrapper);
+  scrollToBottom();
+
+  if (DEV_MODE) console.log('[CHAT DEBUG] pin creation decision buttons rendered');
+}
+window.addPinCreationChoiceButtons = addPinCreationChoiceButtons;
 
 function rescheduleReview(nextReflectionDays, reviewData) {
   if (DEV_MODE) {

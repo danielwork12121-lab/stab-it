@@ -82,17 +82,26 @@ DO NOT: Call in review mode; create fake chat messages; bypass processAIResult()
 
 --- TRANSITION 7: /api/ai/chat PINNING RESPONSE ---
 Trigger: Backend returns pinning AI response
-First: processChatAIResponse(aiResponse) [chat.js]
-Follow-up: addMessage('bot', reply), saveMessage(), (if analysis) save to pin fields, (if readyToPin) setTimeout → addActionButton('交给忧忧', callback)
-State read: getCurrentUser(), getCurrentChatPin(), STABIT_CHAT_MODE
-State mutated: (if analysis) same as transition 6; (if readyToPin) pendingAction='pin'
-API: None
-UI: readyToPin=false → AI reply only; readyToPin=true → AI reply + purple gradient button "交给忧忧"
-DO NOT: Create separate action button systems; bypass addActionButton()
+First: handler() [api/ai/chat.js]
+Follow-up: callAIChatWithFallback() → repairChatResponse() → validateChatResponse() → USER TIMELINE OVERRIDE (extractReflectionDaysFromText() on user messages) → processChatAIResponse(aiResponse) [chat.js]
+State read: getCurrentUser(), getCurrentChatPin(), STABIT_CHAT_MODE, aiResponse.analysis.reflectionDays
+State mutated: (if analysis) same as transition 6; (if readyToPin) pendingAction='pin'; reflectionDays may be overridden by user-specified timeline
+API: POST /api/ai/chat
+UI: readyToPin=false → AI reply only; readyToPin=true → AI reply + two review-style buttons: "继续聊" + "交给悠悠，X天后再看看"
+TIMELINE PRIORITY: User explicit timeline > AI estimate (e.g., "15天后" overrides AI's 7-day recommendation)
+DO NOT: Create separate action button systems; bypass addPinCreationChoiceButtons(); ignore user-specified timelines
 
---- TRANSITION 8: USER CLICKS "交给忧忧" ---
-Trigger: Pinning action button clicked
-First: beginPinCeremony() [chat.js]
+--- TRANSITION 8: PINNING DECISION BUTTONS ---
+Trigger: User clicks either pin creation decision button
+First: addPinCreationChoiceButtons() [chat.js]
+Follow-up:
+  - "继续聊": Remove buttons, clear pendingAction, stay in chat
+  - "交给悠悠，X天后再看看": beginPinCeremony() [chat.js]
+State read: aiResponse.analysis.reflectionDays
+State mutated: pendingAction=null (both); pin.completed=true, pin.hasNeedle=true (second button)
+API: None
+UI: Two review-style purple buttons; "交给悠悠" button uses AI-generated X days
+DO NOT: Show "取下针" button during pinning; create duplicate pin systems
 Follow-up: fadeOutChat(), setTimeout(700ms) → animatePin(), playPinImpactSound() [audio.js], setTimeout(850ms) → showSummaryPanel() [chat.js]
 State read: getCurrentUser(), painPins[last], CHAT_BODY_ZONE
 State mutated: pin.completed=true, pin.hasNeedle=true, pin.isAnimating=false
