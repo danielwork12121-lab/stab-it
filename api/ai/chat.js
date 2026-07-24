@@ -1160,15 +1160,12 @@ function normalizeChatResponse(parsed, mode) {
     }
     normalized.analysis.coreIssue = normalized.analysis.coreIssue.trim();
     
-    // Validate coreIssue: if it appears to be conversational prose, contains ellipsis,
-    // or is excessively long, replace with safe fallback
+    // Validate coreIssue: if it appears to be unfinished, empty, or excessively long,
+    // replace with safe fallback. Chinese punctuation (。！？) is allowed in summaries.
     const isPoorQualityTitle =
   !normalized.analysis.coreIssue ||
   normalized.analysis.coreIssue.includes('…') ||
-  normalized.analysis.coreIssue.length > 40 ||
-  normalized.analysis.coreIssue.includes('。') ||
-  normalized.analysis.coreIssue.includes('！') ||
-  normalized.analysis.coreIssue.includes('？');
+  normalized.analysis.coreIssue.length > 60;
 
 if (isPoorQualityTitle) {
   console.warn(
