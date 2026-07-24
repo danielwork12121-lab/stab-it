@@ -964,21 +964,23 @@ function normalizeChatResponse(parsed, mode) {
     
     // Validate coreIssue: if it appears to be conversational prose, contains ellipsis,
     // or is excessively long, replace with safe fallback
-    const isPoorQualityTitle = 
-      normalized.analysis.coreIssue.includes('…') ||           // contains ellipsis
-      normalized.analysis.coreIssue.length > 30 ||             // excessively long
-      normalized.analysis.coreIssue.startsWith('你') ||       // addresses user as "你"
-      normalized.analysis.coreIssue.includes('。') ||          // contains sentence-ending punctuation
-      normalized.analysis.coreIssue.includes('！') ||
-      normalized.analysis.coreIssue.includes('？') ||
-      normalized.analysis.coreIssue.startsWith('这次烦恼') || // conversational prefix
-      normalized.analysis.coreIssue.startsWith('好像是') ||
-      normalized.analysis.coreIssue.startsWith('听起来');
-    
-    if (isPoorQualityTitle) {
-      normalized.analysis.coreIssue = '这段还未完全放下的烦恼';
-    }
+    const isPoorQualityTitle =
+  !normalized.analysis.coreIssue ||
+  normalized.analysis.coreIssue.includes('…') ||
+  normalized.analysis.coreIssue.length > 40 ||
+  normalized.analysis.coreIssue.includes('。') ||
+  normalized.analysis.coreIssue.includes('！') ||
+  normalized.analysis.coreIssue.includes('？');
 
+if (isPoorQualityTitle) {
+  console.warn(
+    '[COREISSUE DEBUG] rejected coreIssue:',
+    normalized.analysis.coreIssue
+  );
+
+  normalized.analysis.coreIssue =
+    normalized.analysis.coreIssue || '这段还未完全放下的烦恼';
+}
     // Convert reflectionDays to number if it's a string
     if (normalized.analysis.reflectionDays !== null && normalized.analysis.reflectionDays !== undefined) {
       const parsedDays = parseInt(normalized.analysis.reflectionDays, 10);
