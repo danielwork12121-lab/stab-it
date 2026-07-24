@@ -1695,16 +1695,8 @@ function removeReviewedNeedleWithAnimation() {
           chatPanel.remove();
         }
 
-        showHomeScreen();
-          if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
-          setTimeout(() => {
-            if (window.showReleaseConfettiOverlay) {
-              window.showReleaseConfettiOverlay();
-            }
-            if (window.showReleaseCelebrationText) {
-              window.showReleaseCelebrationText();
-            }
-          }, 300);
+        // Converge into universal completion flow
+        completePinRemoval();
       }, 1250);
     } else {
       if (DEV_MODE) console.log('[PIN DEBUG] Matching DOM element not found, removing from storage only');
@@ -1723,18 +1715,8 @@ function removeReviewedNeedleWithAnimation() {
         chatPanel.remove();
       }
 
-      showReleaseCelebrationButton(() => {
-        showHomeScreen();
-        if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
-        setTimeout(() => {
-          if (window.showReleaseConfettiOverlay) {
-            window.showReleaseConfettiOverlay();
-          }
-          if (window.showReleaseCelebrationText) {
-            window.showReleaseCelebrationText();
-          }
-        }, 300);
-      });
+      // Converge into universal completion flow
+      completePinRemoval();
     }
   }, 450);
 }
@@ -1769,7 +1751,7 @@ function showPostRemovalScreen(currentUser) {
       window.STABIT_MODE = 'reviewNeedle';
       window.STABIT_CHAT_MODE = null;
 
-      const existingBadge = chatScreen.querySelector('.day-badge');
+      const existingBadge = homeScreen.querySelector('.day-badge');
       if (existingBadge) {
         existingBadge.textContent = '💗 陪伴第 ' + getCompanionDays() + ' 天';
       }
@@ -1797,32 +1779,14 @@ function showPostRemovalScreen(currentUser) {
 
     demoContainer.appendChild(demoMessage);
     demoContainer.appendChild(fastForwardBtn);
-    chatScreen.appendChild(demoContainer);
+    homeScreen.appendChild(demoContainer);
 
     setTimeout(() => {
       demoContainer.classList.add('show');
     }, 50);
-  } else {
-    const finalMessage = document.createElement('div');
-    finalMessage.className = 'summary-panel';
-    finalMessage.style.display = 'flex';
-    finalMessage.style.flexDirection = 'column';
-    finalMessage.style.alignItems = 'center';
-    finalMessage.style.justifyContent = 'center';
-
-    const messageEl = document.createElement('div');
-    messageEl.className = 'summary-line primary';
-    messageEl.textContent = '今天的针已经都放下了，忧忧会继续陪着你。';
-    messageEl.style.fontSize = '18px';
-
-    finalMessage.appendChild(messageEl);
-    chatScreen.appendChild(finalMessage);
-
-    setTimeout(() => {
-      finalMessage.classList.add('show');
-    }, 50);
   }
 }
+window.showPostRemovalScreen = showPostRemovalScreen;
 
 function addMessage(sender, text) {
   if (sender === 'system') {

@@ -126,12 +126,12 @@ DO NOT: Create custom review panel; bypass findOldestCompletedNeedle()
 --- TRANSITION 11: DIRECT RELEASE ("不会了...") ---
 Trigger: User clicks "不会了，好像已经忘记这件事儿了"
 First: directRemoveNeedle(pinId) [scenes.js]
-Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(500ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), showReleaseCelebrationButton(onContinue), onContinue → showHomeScreen(), setTimeout(300ms) → showReleaseConfettiOverlay() + showReleaseCelebrationText()
+Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(500ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), window.STABIT_MODE=null, window.STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, showHomeScreen()
 State read: painPins (find by pinId)
-State mutated: pin moved from painPins to resolvedPins (preserving chatHistory); resolvedPin.status='resolved', resolvedAt, hasNeedle=false; activePinId=null; reviewingPinId=null; pendingAction=null; pendingReviewAction=null
+State mutated: pin moved from painPins to resolvedPins (preserving chatHistory); resolvedPin.status='resolved', resolvedAt, hasNeedle=false; activePinId=null; reviewingPinId=null; pendingAction=null; pendingReviewAction=null; STABIT_MODE=null
 API: None
-UI: Chat fades; needle animates down (1200ms); ripple; celebration button; after click → home with confetti (3s) + celebration text; AudioManager.playCelebrationSound()
-DO NOT: Create separate removal logic; bypass archiveAndRemovePin(); forget celebration button
+UI: Chat fades; needle animates down (1200ms); ripple; home screen shown
+DO NOT: Create separate removal logic; bypass archiveAndRemovePin(); forget celebration effects
 
 --- TRANSITION 12: REVIEW CHAT ENTRY ---
 Trigger: User clicks "会..." or "有一点儿..." button
@@ -197,14 +197,35 @@ DO NOT: Remove/archive pin; forget to clear review state
 --- TRANSITION 18: REVIEW REMOVE BUTTON ("轻轻取下这根针") ---
 Trigger: User clicks "轻轻取下这根针"
 First: removeReviewedNeedleWithAnimation() [chat.js]
-Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(450ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, chatPanel.remove(), showReleaseCelebrationButton(onContinue), onContinue → showHomeScreen(), setTimeout(300ms) → showReleaseConfettiOverlay() + showReleaseCelebrationText()
+Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(450ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), window.STABIT_MODE=null, window.STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, chatPanel.remove(), showHomeScreen()
 State read: reviewingPinId or window.reviewingPinId, painPins
-State mutated: pin moved to resolvedPins; activePinId=null; reviewingPinId=null; STABIT_CHAT_MODE='pinning'
+State mutated: pin moved to resolvedPins; activePinId=null; reviewingPinId=null; STABIT_CHAT_MODE='pinning'; STABIT_MODE=null
 API: None
-UI: Same as transition 11; AudioManager.playCelebrationSound()
+UI: Same animation as transition 11
 DO NOT: Create separate removal animation
 
---- TRANSITION 19: FALLBACK / ERROR BEHAVIOR ---
+--- TRANSITION 19: UNIVERSAL CELEBRATION BLOCK ---
+Trigger: ANY successful pin removal (directRemoveNeedle or removeReviewedNeedleWithAnimation)
+Note: Removal entry paths may differ, but successful removal always converges into the same completion block.
+First: showReleaseConfettiOverlay() [chat.js]
+Follow-up: showReleaseCelebrationText() [chat.js], AudioManager.playCelebrationSound() [audio.js]
+State read: None
+State mutated: None (celebration is visual/audio only)
+API: None
+UI: Home screen with enlarged stuffy, confetti, celebration text, sound, no chat screen, no intermediate button
+DO NOT: Skip confetti; skip celebration sound; show intermediate buttons; route through chat
+
+--- TRANSITION 20: POST_REMOVAL_ROUTER ---
+Trigger: Celebration block completes (2.8s delay)
+First: showPostRemovalScreen() [chat.js]
+Follow-up: Check remaining reviewable pins via findOldestCompletedNeedle() [scenes.js]
+State read: painPins (filtered for completed && hasNeedle && reviewDay <= currentDay)
+State mutated: None
+API: None
+UI: No remaining reviewable pins → HOME_PIN_CREATION_STATE (clean home); Remaining pins → FAST_FORWARD_REVIEW_STATE (show review panel)
+DO NOT: Skip pin check; route directly to home without checking; create separate pin checking logic
+
+--- TRANSITION 21: FALLBACK / ERROR BEHAVIOR ---
 Trigger: API fails/timeout/billing/malformed JSON
 First: callAIChat() error handler [chat.js]
 Follow-up: addMessage('bot', '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。'), remove loading bubble
@@ -214,7 +235,7 @@ API: None
 UI: Temporary fallback message; loading removed; NO action buttons
 DO NOT: Save fallback to chatHistory; create permanent fallback states; trigger buttons
 
---- TRANSITION 20: AUDIO RULES ---
+--- TRANSITION 22: AUDIO RULES ---
 Trigger: Various actions
 initAudio() → AudioManager.initAudio() [audio.js]: creates Audio objects for bgm, impactAudio, celebrationAudio
 First gesture → AudioManager.isUnlocked=true, AudioManager.startBackgroundMusic()
@@ -301,7 +322,7 @@ createPainDot | public/js/scenes.js | 4
 savePainDot | public/js/scenes.js | 4
 goToChatScene | public/js/scenes.js | 4
 sendMessage | public/js/chat.js | 5,14
-addMessage | public/js/chat.js | 5,7,13,14,15,19
+addMessage | public/js/chat.js | 5,7,13,14,15,21
 saveMessage | public/js/chat.js | 5,7,13,14,15
 callAIChat | public/js/chat.js | 5,12,14
 processChatAIResponse | public/js/chat.js | 5,7,13,15
@@ -314,7 +335,7 @@ playPinImpactSound | public/js/audio.js | 8
 showSummaryPanel | public/js/chat.js | 8
 fastForwardCompanionDays | public/js/scenes.js | 9
 showReviewPanel | public/js/scenes.js | 9,10
-findOldestCompletedNeedle | public/js/scenes.js | 10
+findOldestCompletedNeedle | public/js/scenes.js | 10,20
 enterReviewChat | public/js/scenes.js | 10,12
 directRemoveNeedle | public/js/scenes.js | 10,11
 sendAutoReviewMessage | public/js/chat.js | 12
@@ -322,10 +343,10 @@ addActionButton | public/js/chat.js | 7,15
 addReviewChoiceButtons | public/js/chat.js | 15
 rescheduleReview | public/js/chat.js | 17
 removeReviewedNeedleWithAnimation | public/js/chat.js | 15,18
-showReleaseCelebrationButton | public/js/chat.js | 11,18
-showReleaseConfettiOverlay | public/js/chat.js | 11,18
-showReleaseCelebrationText | public/js/chat.js | 11,18
-AudioManager.playCelebrationSound | public/js/audio.js | 11,18
+showReleaseConfettiOverlay | public/js/chat.js | 19
+showReleaseCelebrationText | public/js/chat.js | 19
+AudioManager.playCelebrationSound | public/js/audio.js | 19
+showPostRemovalScreen | public/js/chat.js | 20
 
 ================================================================================
  API CONTRACTS
@@ -376,7 +397,6 @@ Response: {safe, coreIssue, reflectionDays, warmExplanation, currentGuides}
  UNCERTAIN / NEEDS VERIFICATION
 ================================================================================
 - reviewStage='awaiting_user_reason': Checked in chat.js:808 but never explicitly set in JS. May be set by backend or is a legacy value.
-- showPostRemovalScreen: Exists in chat.js:1452. Called after removeReviewedNeedleWithAnimation when remaining completed pins exist. Not fully tested in all flows.
 
 ================================================================================
  TESTING CHECKLIST

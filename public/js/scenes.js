@@ -714,37 +714,50 @@ function directRemoveNeedle(pinId) {
         const freshUser = getCurrentUser();
         archiveAndRemovePin(freshUser);
 
-        showHomeScreen();
-          if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
-          setTimeout(() => {
-            if (window.showReleaseConfettiOverlay) {
-              window.showReleaseConfettiOverlay();
-            }
-            if (window.showReleaseCelebrationText) {
-              window.showReleaseCelebrationText();
-            }
-          }, 300);
+        // Converge into universal completion flow
+        completePinRemoval();
       }, 1250);
     } else {
       if (DEV_MODE) console.log('[REVIEW DEBUG] No DOM needle found, removing from storage only');
       const freshUser = getCurrentUser();
       archiveAndRemovePin(freshUser);
 
-      showReleaseCelebrationButton(() => {
-        showHomeScreen();
-        if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] returned home true');
-        setTimeout(() => {
-          if (window.showReleaseConfettiOverlay) {
-            window.showReleaseConfettiOverlay();
-          }
-          if (window.showReleaseCelebrationText) {
-            window.showReleaseCelebrationText();
-          }
-        }, 300);
-      });
+      // Converge into universal completion flow
+      completePinRemoval();
     }
   }, 500);
 }
+
+// ============================================================
+// UNIVERSAL PIN REMOVAL COMPLETION FLOW
+// ============================================================
+// All removal paths converge into this same completion block
+// ============================================================
+function completePinRemoval() {
+  if (DEV_MODE) console.log('[REVIEW LOOP DEBUG] universal removal completion started');
+  
+  // Reset state for pin creation
+  window.STABIT_MODE = null;
+  window.STABIT_CHAT_MODE = 'pinning';
+  window.reviewingPinId = null;
+  
+  // CELEBRATION_BLOCK: Same for every removal path
+  showHomeScreen();
+  showReleaseConfettiOverlay();
+  showReleaseCelebrationText();
+setTimeout(() => {
+  const currentUser = getCurrentUser();
+
+  if (currentUser) {
+    currentUser.showReviewShortcut = true;
+    UserStorage.updateUser(currentUser);
+    UserStorage.setCurrentUser(currentUser.username);
+  }
+
+  renderReviewShortcut();
+}, 2800);
+}
+window.completePinRemoval = completePinRemoval;
 
 function createDayBadge(parent, position) {
   if (DEV_MODE) {
