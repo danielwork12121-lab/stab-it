@@ -1450,7 +1450,7 @@ function processChatAIResponse(aiResponse) {
     }
   }
 
-  if (mode === 'pinning' && !isFallbackResponse) {
+  if (mode === 'pinning' && !isFallbackResponse && aiResponse.readyToPin) {
     if (DEV_MODE) {
       console.log('[AI RESPONSE DEBUG] showing pin creation decision buttons');
       console.log('[PIN ANALYSIS DEBUG] no secondary analyze-worry request');

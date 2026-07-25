@@ -280,22 +280,38 @@ analysis.reflectionDays = 14
 - 用户提到被伤害、背叛、长期痛苦：14天
 - 用户提到分手、亲人离世、重大变故：30天
 - 问题已经持续一段时间仍未解决：增加50%天数
-如果用户只说 hello、hi、在吗、你好、我很烦、我不开心，但没有具体事件：
+readyToPin 判断规则：
+
+如果用户只是打招呼、闲聊，或只表达模糊情绪，但没有任何可以识别的烦恼、事件或压力：
 不要总结核心原因。
 不要建议回看时间。
-只温柔地问一个问题，引导用户说出具体发生了什么。
+只温柔地问一个简短问题，引导用户说出发生了什么。
 readyToPin 必须是 false。
 
-如果用户已经说出具体事件：
-不要一直追问。
-直接帮助用户总结核心原因、给出未来导向的小建议、推荐回看时间，并询问是否接受。
-这时 readyToPin 应该是 true。
+例如：
+“你好”
+“我很好”
+“哈哈”
+“今天不开心”
 
-当你已经给出核心原因、行动建议、回看时间时：
-readyToPin 必须是 true。
+如果用户已经说出一个可以识别的烦恼、事件、冲突、压力、担心或被批评的经历：
+不要要求用户先解释完整原因，也不要为了寻找最深层的心理原因而一直追问。
+直接根据当前已知信息给出一个初步总结、一到两个现实的小建议和回看时间。
+readyToPin 应该是 true。
+
+以下表达已经足够让 readyToPin=true：
+“我老师骂我”
+“我和朋友吵架了”
+“我考试压力很大”
+“我被老板批评了”
+“我和父母吵架了”
+
+readyToPin=true 只代表前端可以显示“继续聊”和保存按钮，不代表分析已经最终完成，也不代表针已经创建。
+用户选择“继续聊”后，可以继续补充信息，你可以根据新信息完善 coreIssue、建议和回看时间。
+只有用户点击保存按钮后，前端才会处理扎针仪式。
+
 不要说针已经扎好了。
 不要说仪式已经完成。
-用户点击按钮后会处理扎针仪式。
 
 输出要求：
 
@@ -320,17 +336,22 @@ reply文本和reflectionDays必须一致。
 但是：
 coreIssue 是一个逐步完善的记录标题，不需要在每一次回复中强制重新生成。
 
-如果当前对话已经有足够信息理解用户的问题：
-- 返回一个具体、准确的 coreIssue。
-- coreIssue 应该代表这件烦恼长期回看时最有价值的标题。
-
-如果当前信息不足，或者无法确定更准确的核心问题：
+如果用户还没有说出任何可以识别的烦恼、事件或压力：
 - coreIssue 返回空字符串 ""。
-- 不要生成模糊标题。
-- 不要使用类似"需要回顾的烦恼"、"未解决的问题"、"这段烦恼"等泛化描述。
 
-coreIssue 不应该为了满足格式而猜测。
-准确性优先于完整性。
+如果用户已经说出一个可以识别的问题，即使细节还不完整：
+- 返回一个基于当前已知事实的初步 coreIssue。
+- 不需要等到完全理解最深层原因。
+- 不要猜测用户没有表达过的隐藏动机、关系需求或心理原因。
+- 初步 coreIssue 可以在用户选择“继续聊”并补充信息后进一步完善。
+
+例如：
+“我老师骂我” → “被老师批评后感到难受”
+“我和朋友吵架了” → “与朋友争吵后的关系困扰”
+“我考试压力很大” → “面对考试时感到压力”
+
+不要生成类似“需要回顾的烦恼”“未解决的问题”“这段烦恼”等泛化标题。
+准确性优先于深度；在信息有限时，使用保守、具体、不会过度推断的标题。
 
 analysis.coreIssue 应满足：
 
@@ -974,39 +995,81 @@ function validateChatResponse(response) {
       return { valid: false, error: `analysis is not an object (type: ${typeof analysis})` };
     }
     
-    // coreIssue can be empty only when readyToPin=false (user hasn't given specific event yet)
-    if (typeof analysis.coreIssue !== 'string') {
-      return { valid: false, error: `analysis.coreIssue is not a string (type: ${typeof analysis.coreIssue})` };
-    }
-    if (response.readyToPin && !analysis.coreIssue.trim()) {
-      return { valid: false, error: `analysis.coreIssue must not be empty when readyToPin=true (value: "${String(analysis.coreIssue || '').substring(0, 50)}")` };
-    }
-    
-    const reflectionDays = parseInt(analysis.reflectionDays);
-    if (isNaN(reflectionDays) || reflectionDays < 1 || reflectionDays > 365) {
-      return { valid: false, error: `analysis.reflectionDays is not a valid number (type: ${typeof analysis.reflectionDays}, value: ${analysis.reflectionDays})` };
-    }
-    
-    if (typeof analysis.warmExplanation !== 'string') {
-      return { valid: false, error: `analysis.warmExplanation is not a string (type: ${typeof analysis.warmExplanation})` };
-    }
-    
-    // currentGuides must be array of 0-3 strings (repair layer will pad to 3)
-    if (!Array.isArray(analysis.currentGuides)) {
-      return { valid: false, error: `analysis.currentGuides is not an array (type: ${typeof analysis.currentGuides})` };
-    }
-    if (analysis.currentGuides.length > 3) {
-      return { valid: false, error: `analysis.currentGuides has more than 3 elements (length: ${analysis.currentGuides.length})` };
-    }
-    
-    for (let i = 0; i < analysis.currentGuides.length; i++) {
-      if (typeof analysis.currentGuides[i] !== 'string') {
-        return { valid: false, error: `analysis.currentGuides[${i}] is not a string (type: ${typeof analysis.currentGuides[i]})` };
+    if (response.readyToPin) {
+      // Strict validation when readyToPin=true (complete pinning data)
+      
+      // coreIssue must be non-empty when readyToPin=true
+      if (typeof analysis.coreIssue !== 'string') {
+        return { valid: false, error: `analysis.coreIssue is not a string (type: ${typeof analysis.coreIssue})` };
       }
-    }
-    
-    if (typeof analysis.safe !== 'boolean') {
-      return { valid: false, error: `analysis.safe is not a boolean (type: ${typeof analysis.safe}, value: ${analysis.safe})` };
+      if (!analysis.coreIssue.trim()) {
+        return { valid: false, error: `analysis.coreIssue must not be empty when readyToPin=true (value: "${String(analysis.coreIssue || '').substring(0, 50)}")` };
+      }
+      
+      // reflectionDays must be valid integer 1-365
+      const reflectionDays = parseInt(analysis.reflectionDays);
+      if (isNaN(reflectionDays) || reflectionDays < 1 || reflectionDays > 365) {
+        return { valid: false, error: `analysis.reflectionDays is not a valid number (type: ${typeof analysis.reflectionDays}, value: ${analysis.reflectionDays})` };
+      }
+      
+      // warmExplanation must be string
+      if (typeof analysis.warmExplanation !== 'string') {
+        return { valid: false, error: `analysis.warmExplanation is not a string (type: ${typeof analysis.warmExplanation})` };
+      }
+      
+      // currentGuides must have exactly 3 strings
+      if (!Array.isArray(analysis.currentGuides)) {
+        return { valid: false, error: `analysis.currentGuides is not an array (type: ${typeof analysis.currentGuides})` };
+      }
+      if (analysis.currentGuides.length !== 3) {
+        return { valid: false, error: `analysis.currentGuides must have exactly 3 elements (length: ${analysis.currentGuides.length})` };
+      }
+      for (let i = 0; i < analysis.currentGuides.length; i++) {
+        if (typeof analysis.currentGuides[i] !== 'string' || !analysis.currentGuides[i].trim()) {
+          return { valid: false, error: `analysis.currentGuides[${i}] is not a non-empty string (type: ${typeof analysis.currentGuides[i]}, value: "${String(analysis.currentGuides[i] || '').substring(0, 50)}")` };
+        }
+      }
+      
+      if (typeof analysis.safe !== 'boolean') {
+        return { valid: false, error: `analysis.safe is not a boolean (type: ${typeof analysis.safe}, value: ${analysis.safe})` };
+      }
+    } else {
+      // Lenient validation when readyToPin=false (early chat, incomplete data)
+      
+      if (typeof analysis.coreIssue !== 'string') {
+        return { valid: false, error: `analysis.coreIssue is not a string (type: ${typeof analysis.coreIssue})` };
+      }
+      // coreIssue may be empty in early chat
+      
+      if (analysis.reflectionDays !== null && analysis.reflectionDays !== undefined) {
+        const reflectionDays = parseInt(analysis.reflectionDays);
+        if (isNaN(reflectionDays) || reflectionDays < 0 || reflectionDays > 365) {
+          return { valid: false, error: `analysis.reflectionDays is not a valid number (type: ${typeof analysis.reflectionDays}, value: ${analysis.reflectionDays})` };
+        }
+        // reflectionDays may be 0 in early chat
+      }
+      
+      if (typeof analysis.warmExplanation !== 'string') {
+        return { valid: false, error: `analysis.warmExplanation is not a string (type: ${typeof analysis.warmExplanation})` };
+      }
+      // warmExplanation may be empty in early chat
+      
+      if (!Array.isArray(analysis.currentGuides)) {
+        return { valid: false, error: `analysis.currentGuides is not an array (type: ${typeof analysis.currentGuides})` };
+      }
+      if (analysis.currentGuides.length > 3) {
+        return { valid: false, error: `analysis.currentGuides has more than 3 elements (length: ${analysis.currentGuides.length})` };
+      }
+      for (let i = 0; i < analysis.currentGuides.length; i++) {
+        if (typeof analysis.currentGuides[i] !== 'string') {
+          return { valid: false, error: `analysis.currentGuides[${i}] is not a string (type: ${typeof analysis.currentGuides[i]})` };
+        }
+      }
+      // currentGuides may have 0-3 strings in early chat
+      
+      if (typeof analysis.safe !== 'boolean') {
+        return { valid: false, error: `analysis.safe is not a boolean (type: ${typeof analysis.safe}, value: ${analysis.safe})` };
+      }
     }
   }
   
@@ -1258,7 +1321,9 @@ function repairChatResponse(response, mode) {
   }
 
   // Repair analysis object for pinning mode
-  if (mode === 'pinning') {
+  // Only add/fix analysis when readyToPin=true (complete pinning data)
+  // For early chat (readyToPin=false), don't add incomplete analysis fields
+  if (mode === 'pinning' && repaired.readyToPin) {
     if (!repaired.analysis || typeof repaired.analysis !== 'object') {
       repaired.analysis = createFallbackAnalysis(repaired.reply || '');
     } else {
@@ -2189,8 +2254,13 @@ function parseToolCallPinningResponse(data) {
     return null;
   }
   
-  if (!Array.isArray(args.currentGuides) || args.currentGuides.length !== 3) {
-    console.warn('[MINIMAX TOOL CALL] currentGuides must have exactly 3 items, got:', args.currentGuides?.length);
+  // currentGuides validation: require exactly 3 when readyToPin=true, allow 0-3 when readyToPin=false
+  if (!Array.isArray(args.currentGuides)) {
+    console.warn('[MINIMAX TOOL CALL] currentGuides must be an array');
+    return null;
+  }
+  if (args.readyToPin && args.currentGuides.length !== 3) {
+    console.warn('[MINIMAX TOOL CALL] currentGuides must have exactly 3 items when readyToPin=true, got:', args.currentGuides.length);
     return null;
   }
   
@@ -2198,15 +2268,20 @@ function parseToolCallPinningResponse(data) {
   const response = {
     reply: args.reply,
     readyToPin: args.readyToPin,
-    readyToRemove: args.readyToRemove,
-    analysis: {
+    readyToRemove: args.readyToRemove
+  };
+  
+  // Only include analysis when readyToPin=true (complete pinning data)
+  // For early chat (readyToPin=false), don't expose incomplete analysis fields
+  if (args.readyToPin) {
+    response.analysis = {
       safe: true,
       coreIssue: typeof args.coreIssue === 'string' ? args.coreIssue : '',
       reflectionDays: reflectionDays,
       warmExplanation: typeof args.warmExplanation === 'string' ? args.warmExplanation : '',
       currentGuides: args.currentGuides.filter(g => typeof g === 'string')
-    }
-  };
+    };
+  }
   
   console.log('[MINIMAX TOOL CALL] Successfully parsed tool call response');
   return response;
