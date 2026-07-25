@@ -1237,12 +1237,15 @@ async function callAIChat(userText, options = {}) {
       if (DEV_MODE) {
         console.warn('[AI CHAT DEBUG] =========================');
         console.warn('[AI CHAT DEBUG] Backend returned fallback response');
-        console.warn('[AI CHAT DEBUG] fallback source:', 'backend_debugFallback');
+        console.warn('[AI CHAT DEBUG] requestId:', aiResponse.requestId);
         console.warn('[AI CHAT DEBUG] fallbackReason:', aiResponse.fallbackReason);
         console.warn('[AI CHAT DEBUG] Mode:', mode);
         console.warn('[AI CHAT DEBUG] reviewStage:', reviewStage);
         console.warn('[AI CHAT DEBUG] Elapsed ms:', Date.now() - startTime);
         console.warn('[AI CHAT DEBUG] fallback persisted:', false);
+      } else {
+        // Production: concise log only
+        console.warn('[AI] fallback requestId:', aiResponse.requestId, 'reason:', aiResponse.fallbackReason);
       }
 
       const fallbackReply = '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。';
@@ -1262,7 +1265,10 @@ async function callAIChat(userText, options = {}) {
       readyToRemove: !!aiResponse.readyToRemove,
       analysis: aiResponse.analysis,
       review: aiResponse.review,
-      reviewDays: aiResponse.reviewDays
+      reviewDays: aiResponse.reviewDays,
+      requestId: aiResponse.requestId,
+      debugFallback: aiResponse.debugFallback,
+      fallbackReason: aiResponse.fallbackReason
     };
 
     if (DEV_MODE) {
@@ -1275,34 +1281,26 @@ async function callAIChat(userText, options = {}) {
   } catch (error) {
     const elapsedMs = Date.now() - startTime;
 
+    // Classify error type for concise logging
+    const errorType = error.name === 'AbortError' ? 'timeout'
+                    : error.name === 'TypeError' ? 'network'
+                    : error.message?.includes('JSON parse') ? 'malformed_output'
+                    : error.message?.includes('HTTP error') ? 'http_error'
+                    : 'unknown';
+
     if (DEV_MODE) {
       console.warn('[AI CHAT DEBUG] =========================');
       console.warn('[AI CHAT DEBUG] API call FAILED!');
+      console.warn('[AI CHAT DEBUG] Error type:', errorType);
       console.warn('[AI CHAT DEBUG] Error:', error.message);
-      console.warn('[AI CHAT DEBUG] Error name:', error.name);
-      console.warn('[AI CHAT DEBUG] Error stack:', error.stack);
       console.warn('[AI CHAT DEBUG] Mode:', mode);
-      console.warn('[AI CHAT DEBUG] reviewStage:', reviewStage);
-      console.warn('[AI CHAT DEBUG] fallback displayed: true');
-      console.warn('[AI CHAT DEBUG] fallback persisted: false');
-      console.warn('[AI CHAT DEBUG] fallback reason:', error.message);
-      console.warn('[AI CHAT DEBUG] Error type:', typeof error);
       console.warn('[AI CHAT DEBUG] Elapsed ms:', elapsedMs);
-      if (error.name === 'AbortError') {
-        console.warn('[AI CHAT DEBUG] Request was aborted/timeout');
-      }
-      if (error.name === 'TypeError') {
-        console.warn('[AI CHAT DEBUG] Network error or request issue');
-      }
+    } else {
+      console.warn('[AI] fetch failed type:', errorType, 'elapsed:', elapsedMs + 'ms');
     }
 
     const fallbackReply = '忧忧这次没有想完。请再发一次，我会继续陪你看这件事。';
     addMessage('bot', fallbackReply);
-
-    if (DEV_MODE) {
-      console.warn('[AI CHAT DEBUG] fallback source:', 'frontend_fetch_error');
-      console.warn('[AI CHAT DEBUG] fallback persisted:', false);
-    }
 
     return false;
   } finally {
@@ -1340,7 +1338,19 @@ function processChatAIResponse(aiResponse) {
     console.log('[REVIEW DEBUG] current reviewStage after saveMessage:', currentUser?.reviewStage);
   }
 
-  if (aiResponse.analysis) {
+  // ── State safety: never save analysis metadata from fallback/failure responses ──
+  // AI output is a proposal; only real AI responses should update pin state.
+  const isFallbackResponse = aiResponse.debugFallback === true || !!aiResponse.fallbackReason;
+
+  if (isFallbackResponse) {
+    if (DEV_MODE) {
+      console.warn('[AI SAFETY] Fallback response detected — skipping analysis metadata save');
+      console.warn('[AI SAFETY] requestId:', aiResponse.requestId);
+      console.warn('[AI SAFETY] fallbackReason:', aiResponse.fallbackReason);
+    }
+  }
+
+  if (aiResponse.analysis && !isFallbackResponse) {
     if (DEV_MODE) {
       console.log('[AI RESPONSE DEBUG] chat analysis source: /api/ai/chat');
       console.log('[PIN ANALYSIS DEBUG] metadata received');
@@ -1440,7 +1450,7 @@ function processChatAIResponse(aiResponse) {
     }
   }
 
-  if (mode === 'pinning') {
+  if (mode === 'pinning' && !isFallbackResponse) {
     if (DEV_MODE) {
       console.log('[AI RESPONSE DEBUG] showing pin creation decision buttons');
       console.log('[PIN ANALYSIS DEBUG] no secondary analyze-worry request');

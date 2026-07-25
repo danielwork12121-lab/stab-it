@@ -1,6 +1,128 @@
 const DEFAULT_API_URL = 'https://ark.cn-beijing.volces.com/api/v3/responses';
-const MINIMAX_TIMEOUT_MS = 30000;
-const DOUBAO_TIMEOUT_MS = 60000;
+
+// ── AI Reliability & Observability config ──────────────────────────────
+const AI_DEBUG = process.env.AI_DEBUG === 'true';
+
+// Function max duration (milliseconds).
+// CONFIRMED: none — Vercel/Netlify dashboard plan limits are not code-readable.
+// This is an explicit application env var. Set it to match your hosting plan's
+// configured function timeout. If absent, a conservative DEFAULT is used.
+const AI_FUNCTION_MAX_DURATION_MS = (() => {
+  const v = parseInt(process.env.AI_FUNCTION_MAX_DURATION_MS, 10);
+  if (!isNaN(v) && v >= 10000 && v <= 900000) return v;
+  // DEFAULT (not detected truth): conservative 60s covers most Vercel plans.
+  // Set AI_FUNCTION_MAX_DURATION_MS explicitly to enable longer budgets.
+  return 60000;
+})();
+
+// Reserve time for parsing, fallback construction, and sending response.
+// Configurable; default 10s.
+const RESPONSE_RESERVE_MS = (() => {
+  const v = parseInt(process.env.AI_RESPONSE_RESERVE_MS, 10);
+  if (!isNaN(v) && v >= 1000 && v <= 60000) return v;
+  return 10000;
+})();
+
+// Total AI budget = function max duration minus reserve (clamped to safe minimum).
+// When AI_FUNCTION_MAX_DURATION_MS >= 120000, preferred budget is 100–110s.
+const AI_TOTAL_BUDGET_MS = (() => {
+  const v = parseInt(process.env.AI_TOTAL_BUDGET_MS, 10);
+  if (!isNaN(v) && v >= 15000 && v <= AI_FUNCTION_MAX_DURATION_MS) return v;
+  const budget = AI_FUNCTION_MAX_DURATION_MS - RESPONSE_RESERVE_MS;
+  // Preferred generous budget when runtime safely supports it
+  if (AI_FUNCTION_MAX_DURATION_MS >= 120000) return Math.min(110000, budget);
+  return Math.max(15000, budget);
+})();
+
+// First-attempt timeout. Configurable; preferred 75–85s when budget allows.
+const AI_FIRST_ATTEMPT_TIMEOUT_MS = (() => {
+  const v = parseInt(process.env.AI_FIRST_ATTEMPT_TIMEOUT_MS, 10);
+  if (!isNaN(v) && v >= 5000 && v <= AI_TOTAL_BUDGET_MS) return v;
+  if (AI_TOTAL_BUDGET_MS >= 90000) return Math.min(85000, Math.floor(AI_TOTAL_BUDGET_MS * 0.75));
+  return Math.floor(AI_TOTAL_BUDGET_MS * 0.7);
+})();
+
+// Minimum remaining time required before launching a retry.
+const AI_RETRY_MIN_REMAINING_MS = (() => {
+  const v = parseInt(process.env.AI_RETRY_MIN_REMAINING_MS, 10);
+  if (!isNaN(v) && v >= 5000 && v <= 60000) return v;
+  return 20000;
+})();
+
+// Legacy constants kept for backward compatibility but superseded by budget logic
+const MINIMAX_TIMEOUT_MS = AI_FIRST_ATTEMPT_TIMEOUT_MS;
+const DOUBAO_TIMEOUT_MS = AI_FIRST_ATTEMPT_TIMEOUT_MS;
+
+// ── Production-safe logging (allowlist-only) ───────────────────────────
+// Only approved primitive fields are ever emitted. No request bodies,
+// provider responses, messages, prompts, errors with raw payloads, or
+// nested objects reach production logs.
+const AI_LOG_ALLOWLIST = new Set([
+  'requestId', 'id', 'mode', 'provider', 'fallbackProvider', 'attempt', 'status',
+  'durationMs', 'outcome', 'errorType', 'remainingMs', 'timeoutMs',
+  'valid', 'usedFallback', 'budgetMs', 'messagesCount', 'extracted',
+  'previous', 'rawReason'
+]);
+
+function aiLog(level, msg, ctx = {}) {
+  const prefix = `[AI ${level.toUpperCase()}]`;
+  if (AI_DEBUG) {
+    // In debug mode, emit only allowlisted primitive fields
+    const safeCtx = {};
+    for (const [key, value] of Object.entries(ctx)) {
+      if (AI_LOG_ALLOWLIST.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) {
+        safeCtx[key] = value;
+      }
+    }
+    console.log(prefix, msg, safeCtx);
+  } else {
+    // In production, log only the summary line
+    console.log(prefix, msg);
+  }
+}
+
+// ── Request ID generation ──────────────────────────────────────────────
+function generateRequestId() {
+  return 'req_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
+}
+
+// ── Typed failure classification ───────────────────────────────────────
+function classifyFallbackReason(rawReason) {
+  if (!rawReason || typeof rawReason !== 'string') return 'validation_failure';
+  const r = rawReason.toLowerCase();
+  if (r.includes('timeout') || r.includes('aborterror') || r.includes('abort')) return 'provider_timeout';
+  if (r.includes('429') || r.includes('rate_limited') || r.includes('rate limit')) return 'provider_rate_limited';
+  if (r.includes('401') || r.includes('403') || r.includes('auth') || r.includes('unauthorized') || r.includes('forbidden')) return 'provider_auth_error';
+  if (r.includes('402') || r.includes('balance') || r.includes('insufficient_quota') || r.includes('quota')) return 'provider_balance_error';
+  if (r.includes('econn') || r.includes('network') || r.includes('enotfound') || r.includes('econnreset')) return 'network_error';
+  if (r.includes('500') || r.includes('502') || r.includes('503') || r.includes('504') || r.includes('http_5')) return 'provider_http_error';
+  if (r.includes('missing_api_key') || r.includes('missing_model') || r.includes('missing_content') || r.includes('missing_output') || r.includes('missing_structured')) return 'missing_structured_output';
+  if (r.includes('invalid_response') || r.includes('invalid_structured') || r.includes('tool_call')) return 'invalid_structured_output';
+  if (r.includes('retry_failed')) return 'validation_failure';
+  if (r.includes('exception')) return 'server_exception';
+  return 'validation_failure';
+}
+
+// Determine if a failure reason is retryable
+function isRetryableReason(rawReason) {
+  const typed = classifyFallbackReason(rawReason);
+  return [
+    'provider_timeout',
+    'provider_rate_limited',
+    'provider_http_error',
+    'network_error',
+    'missing_structured_output'
+  ].includes(typed);
+}
+
+// Determine if a failure reason is an auth/config/balance error (never retry)
+function isNonRetryableConfigError(rawReason) {
+  const typed = classifyFallbackReason(rawReason);
+  return [
+    'provider_auth_error',
+    'provider_balance_error'
+  ].includes(typed);
+}
 
 const FALLBACK_RESPONSES = {
   pinning: {
@@ -976,10 +1098,15 @@ function parseDoubaoContent(data, apiUrl) {
   return content;
 }
 
-function fallbackResponseForReason(mode, reason) {
-  console.warn('[AI CHAT] Fallback reason:', reason);
+function fallbackResponseForReason(mode, reason, requestId) {
+  const typedReason = classifyFallbackReason(reason);
+  aiLog('end', 'fallback', { id: requestId, mode, errorType: typedReason, rawReason: reason });
   const fallback = { ...FALLBACK_RESPONSES[mode] };
-  fallback.fallbackReason = reason;
+  fallback.fallbackReason = typedReason;
+  fallback.debugFallback = true;
+  if (requestId) {
+    fallback.requestId = requestId;
+  }
   return fallback;
 }
 
@@ -1020,35 +1147,31 @@ function buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin) {
   }
 }
 
-async function callDoubaoChat(mode, messages, pin) {
+async function callDoubaoChat(mode, messages, pin, requestId = '', attempt = 1, deadlineMs = null) {
   const startTime = Date.now();
   const apiKey = process.env.DOUBAO_API_KEY;
   const modelId = process.env.DOUBAO_MODEL_ID;
   const apiUrl = process.env.DOUBAO_API_URL || DEFAULT_API_URL;
 
-  const apiKeyPrefix = apiKey ? apiKey.substring(0, 8) + '...' : 'MISSING';
-  console.log('[DOUBAO CHAT] Endpoint:', apiUrl);
-  console.log('[DOUBAO CHAT] Model:', modelId || 'MISSING');
-  console.log('[DOUBAO CHAT] API key exists:', !!apiKey);
-  console.log('[DOUBAO CHAT] API key prefix:', apiKeyPrefix);
+  // Compute attempt timeout from budget
+  const remainingMs = deadlineMs ? Math.max(5000, deadlineMs - Date.now()) : AI_FIRST_ATTEMPT_TIMEOUT_MS;
+  const attemptTimeoutMs = Math.min(AI_FIRST_ATTEMPT_TIMEOUT_MS, remainingMs);
+
+  aiLog('attempt', 'doubao', { id: requestId, attempt, timeoutMs: attemptTimeoutMs });
 
   if (!apiKey || !modelId) {
-    console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
-    return fallbackResponseForReason(mode, 'missing_api_key_or_model_id');
+    aiLog('provider', 'doubao missing config', { id: requestId, durationMs: 0 });
+    return fallbackResponseForReason(mode, 'missing_api_key_or_model_id', requestId);
   }
 
   const body = buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin);
 
   try {
-    console.log('[DOUBAO CHAT] Calling API with body length:', JSON.stringify(body).length);
-    console.log('[DOUBAO CHAT] Request body keys:', Object.keys(body));
-    console.log('[DOUBAO CHAT] Timeout:', DOUBAO_TIMEOUT_MS, 'ms');
-    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      console.warn('[DOUBAO CHAT] Request timed out after', DOUBAO_TIMEOUT_MS, 'ms');
+      aiLog('provider', 'doubao timeout', { id: requestId, timeoutMs: attemptTimeoutMs });
       controller.abort();
-    }, DOUBAO_TIMEOUT_MS);
+    }, attemptTimeoutMs);
     
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -1062,37 +1185,33 @@ async function callDoubaoChat(mode, messages, pin) {
     
     clearTimeout(timeoutId);
 
-    console.log('[DOUBAO CHAT] Doubao response status:', response.status);
+    const durationMs = Date.now() - startTime;
+    aiLog('provider', 'doubao response', { id: requestId, status: response.status, durationMs });
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
-      console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
-      return fallbackResponseForReason(mode, `http_${response.status}:${errorBody.substring(0, 120)}`);
+      return fallbackResponseForReason(mode, `http_${response.status}:${errorBody.substring(0, 80)}`, requestId);
     }
 
     const data = await response.json();
-
     const content = parseDoubaoContent(data, apiUrl);
 
     if (!content) {
-      console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
-      return fallbackResponseForReason(mode, 'missing_output_text');
+      return fallbackResponseForReason(mode, 'missing_output_text', requestId);
     }
 
-    console.log('[DOUBAO CHAT] Extracted content length:', content.length);
-
     const parsedResponse = parseAndValidateResponse(content, mode);
-    console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
     
     if (parsedResponse) {
+      aiLog('parse', 'doubao content', { id: requestId, valid: true, durationMs: Date.now() - startTime });
       return parsedResponse;
     }
 
-    return fallbackResponseForReason(mode, 'invalid_response_shape');
+    return fallbackResponseForReason(mode, 'invalid_response_shape', requestId);
 
   } catch (error) {
-    console.log('[DOUBAO CHAT] Elapsed:', Date.now() - startTime, 'ms');
-    return fallbackResponseForReason(mode, `exception:${error.message}`);
+    const isTimeout = error.name === 'AbortError';
+    return fallbackResponseForReason(mode, isTimeout ? 'doubao_timeout' : `exception:${error.message}`, requestId);
   }
 }
 
@@ -2140,34 +2259,33 @@ function getMinimaxApiKey() {
          process.env.MINI_MAX_API_KEY;
 }
 
-async function callMinimaxChat(mode, messages, pin) {
+async function callMinimaxChat(mode, messages, pin, requestId = '', attempt = 1, deadlineMs = null) {
   const startTime = Date.now();
   const apiKey = getMinimaxApiKey();
   const modelId = process.env.MINIMAX_MODEL_ID;
   const apiUrl = process.env.MINIMAX_API_URL || 'https://api.minimaxi.com/v1';
 
-  const apiKeyPrefix = apiKey ? apiKey.substring(0, 8) + '...' : 'MISSING';
-  console.log('[MINIMAX CHAT] Endpoint:', apiUrl);
-  console.log('[MINIMAX CHAT] Model:', modelId || 'MISSING');
-  console.log('[MINIMAX CHAT] API key exists:', !!apiKey);
-  console.log('[MINIMAX CHAT] API key prefix:', apiKeyPrefix);
+  // Compute attempt timeout from budget
+  const remainingMs = deadlineMs ? Math.max(5000, deadlineMs - Date.now()) : AI_FIRST_ATTEMPT_TIMEOUT_MS;
+  const attemptTimeoutMs = attempt === 1
+    ? Math.min(AI_FIRST_ATTEMPT_TIMEOUT_MS, remainingMs)
+    : Math.min(remainingMs, AI_FIRST_ATTEMPT_TIMEOUT_MS);
+
+  aiLog('attempt', 'minimax', { id: requestId, attempt, timeoutMs: attemptTimeoutMs });
 
   if (!apiKey || !modelId) {
-    console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
-    return fallbackResponseForReason(mode, 'minimax_missing_api_key_or_model_id');
+    aiLog('provider', 'minimax missing config', { id: requestId, durationMs: 0 });
+    return fallbackResponseForReason(mode, 'minimax_missing_api_key_or_model_id', requestId);
   }
 
   const body = buildMinimaxChatBody(modelId, mode, messages, pin);
 
   try {
-    console.log('[MINIMAX CHAT] Calling API with body length:', JSON.stringify(body).length);
-    console.log('[MINIMAX CHAT] Timeout:', MINIMAX_TIMEOUT_MS, 'ms');
-    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      console.warn('[MINIMAX CHAT] Request timed out after', MINIMAX_TIMEOUT_MS, 'ms');
+      aiLog('provider', 'minimax timeout', { id: requestId, timeoutMs: attemptTimeoutMs });
       controller.abort();
-    }, MINIMAX_TIMEOUT_MS);
+    }, attemptTimeoutMs);
     
     const response = await fetch(`${apiUrl}/chat/completions`, {
       method: 'POST',
@@ -2181,12 +2299,12 @@ async function callMinimaxChat(mode, messages, pin) {
     
     clearTimeout(timeoutId);
 
-    console.log('[MINIMAX CHAT] Minimax response status:', response.status);
+    const durationMs = Date.now() - startTime;
+    aiLog('provider', 'minimax response', { id: requestId, status: response.status, durationMs });
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
-      console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
-      return fallbackResponseForReason(mode, `minimax_http_${response.status}:${errorBody.substring(0, 120)}`);
+      return fallbackResponseForReason(mode, `minimax_http_${response.status}:${errorBody.substring(0, 80)}`, requestId);
     }
 
     const data = await response.json();
@@ -2196,112 +2314,142 @@ async function callMinimaxChat(mode, messages, pin) {
       const toolCallResponse = parseToolCallPinningResponse(data);
       
       if (toolCallResponse) {
-        console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
+        aiLog('parse', 'minimax tool_call', { id: requestId, valid: true, durationMs });
         return toolCallResponse;
       }
       
-      // No tool call found - retry once with tool-only reminder
-      console.warn('[MINIMAX CHAT] No tool call in pinning response, retrying with reminder');
-      
-      const retryBody = buildMinimaxChatBody(modelId, mode, messages, pin);
-      // Add reminder as the last user message
-      retryBody.messages.push({
-        role: 'user',
-        content: '必须调用 submit_pinning_response。不要直接输出普通文本。'
-      });
-      
-      const retryResponse = await fetch(`${apiUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(retryBody),
-        signal: controller.signal
-      });
-      
-      if (retryResponse.ok) {
-        const retryData = await retryResponse.json();
-        const retryToolCallResponse = parseToolCallPinningResponse(retryData);
+      // No tool call found - retry with tool-only reminder if budget allows
+      const retryRemainingMs = deadlineMs ? deadlineMs - Date.now() : AI_RETRY_MIN_REMAINING_MS + 1;
+      if (retryRemainingMs > AI_RETRY_MIN_REMAINING_MS) {
+        aiLog('attempt', 'minimax tool retry', { id: requestId, attempt: attempt + 1 });
         
-        if (retryToolCallResponse) {
-          console.log('[MINIMAX CHAT] Retry succeeded with tool call. Elapsed:', Date.now() - startTime, 'ms');
-          return retryToolCallResponse;
+        const retryBody = buildMinimaxChatBody(modelId, mode, messages, pin);
+        retryBody.messages.push({
+          role: 'user',
+          content: '必须调用 submit_pinning_response。不要直接输出普通文本。'
+        });
+        
+        const retryController = new AbortController();
+        const retryTimeoutMs = Math.min(retryRemainingMs - 5000, AI_FIRST_ATTEMPT_TIMEOUT_MS);
+        const retryTimeoutId = setTimeout(() => retryController.abort(), retryTimeoutMs);
+        
+        const retryResponse = await fetch(`${apiUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(retryBody),
+          signal: retryController.signal
+        });
+        
+        clearTimeout(retryTimeoutId);
+        
+        if (retryResponse.ok) {
+          const retryData = await retryResponse.json();
+          const retryToolCallResponse = parseToolCallPinningResponse(retryData);
+          
+          if (retryToolCallResponse) {
+            aiLog('parse', 'minimax tool_call retry', { id: requestId, valid: true, durationMs: Date.now() - startTime });
+            return retryToolCallResponse;
+          }
         }
-        
-        console.warn('[MINIMAX CHAT] Retry also failed to produce tool call, falling back to content parsing');
       }
     }
 
     // Fall back to content parsing (tagged/JSON/plain-text)
     const content = data.choices?.[0]?.message?.content;
     if (!content) {
-      console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
-      return fallbackResponseForReason(mode, 'minimax_missing_content');
+      return fallbackResponseForReason(mode, 'minimax_missing_content', requestId);
     }
-
-    console.log('[MINIMAX CHAT] Raw content length:', content.length);
 
     const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     
     const parsedResponse = parseAndValidateResponse(cleanContent, mode);
-    console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
     
     if (parsedResponse) {
+      aiLog('parse', 'minimax content', { id: requestId, valid: true, durationMs: Date.now() - startTime });
       return parsedResponse;
     }
 
-    return fallbackResponseForReason(mode, 'minimax_invalid_response_shape');
+    return fallbackResponseForReason(mode, 'minimax_invalid_response_shape', requestId);
 
   } catch (error) {
-    console.log('[MINIMAX CHAT] Elapsed:', Date.now() - startTime, 'ms');
-    return fallbackResponseForReason(mode, `minimax_exception:${error.message}`);
+    const durationMs = Date.now() - startTime;
+    const isTimeout = error.name === 'AbortError';
+    return fallbackResponseForReason(mode, isTimeout ? 'minimax_timeout' : `minimax_exception:${error.message}`, requestId);
   }
 }
 
-async function callAIChatWithFallback(mode, messages, pin) {
+async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadlineMs = null) {
   const provider = process.env.AI_PROVIDER || 'doubao';
   const fallbackProvider = process.env.AI_FALLBACK_PROVIDER || 'none';
   
-  console.log('[AI CHAT] Selected provider:', provider);
-  console.log('[AI CHAT] Fallback provider:', fallbackProvider);
+  aiLog('start', 'callAIChatWithFallback', { id: requestId, mode, provider, fallbackProvider, budgetMs: deadlineMs ? deadlineMs - Date.now() : 'none' });
 
   let result;
   let usedFallback = false;
   let retried = false;
 
   if (provider === 'minimax') {
-    result = await callMinimaxChat(mode, messages, pin);
+    result = await callMinimaxChat(mode, messages, pin, requestId, 1, deadlineMs);
     
     if (!validateChatResponse(result).valid) {
-      const isTimeoutError = result.fallbackReason && (
-        result.fallbackReason.includes('timeout') || 
-        result.fallbackReason.includes('AbortError') ||
-        result.fallbackReason.includes('ECONN') ||
-        result.fallbackReason.includes('Network')
-      );
+      const shouldRetry = isRetryableReason(result.fallbackReason);
+      const remainingMs = deadlineMs ? deadlineMs - Date.now() : AI_RETRY_MIN_REMAINING_MS + 1;
+      const hasBudgetForRetry = remainingMs > AI_RETRY_MIN_REMAINING_MS;
+      const isConfigError = isNonRetryableConfigError(result.fallbackReason);
       
-      if (isTimeoutError && !retried) {
-        console.log('[AI CHAT] Minimax timeout/network error, retrying once');
+      // Same-provider retry: only for transient errors with sufficient budget
+      if (shouldRetry && !retried && hasBudgetForRetry && !isConfigError) {
+        aiLog('attempt', 'minimax retry', { id: requestId, attempt: 2, remainingMs });
         retried = true;
-        result = await callMinimaxChat(mode, messages, pin);
+        result = await callMinimaxChat(mode, messages, pin, requestId, 2, deadlineMs);
+      } else if (isConfigError) {
+        aiLog('attempt', 'minimax no retry (config error)', { id: requestId, rawReason: result.fallbackReason });
+      } else if (!shouldRetry) {
+        aiLog('attempt', 'minimax no retry (non-retryable)', { id: requestId, rawReason: result.fallbackReason });
+      } else if (!hasBudgetForRetry) {
+        aiLog('attempt', 'minimax no retry (budget exhausted)', { id: requestId, remainingMs });
       }
       
+      // Backup-provider fallback: evaluated independently of same-provider retry decision.
+      // Auth/balance/config errors on MiniMax do NOT prevent an independently configured
+      // Doubao fallback from running (if budget allows).
       if (!validateChatResponse(result).valid && fallbackProvider === 'doubao') {
-        console.log('[AI CHAT] Minimax failed, falling back to Doubao');
-        usedFallback = true;
-        result = await callDoubaoChat(mode, messages, pin);
+        const fallbackRemainingMs = deadlineMs ? deadlineMs - Date.now() : AI_RETRY_MIN_REMAINING_MS + 1;
+        if (fallbackRemainingMs > AI_RETRY_MIN_REMAINING_MS) {
+          aiLog('attempt', 'doubao fallback', { id: requestId, remainingMs: fallbackRemainingMs });
+          usedFallback = true;
+          result = await callDoubaoChat(mode, messages, pin, requestId, 1, deadlineMs);
+        } else {
+          aiLog('attempt', 'doubao fallback skipped (budget exhausted)', { id: requestId, remainingMs: fallbackRemainingMs });
+        }
       }
     }
   } else {
-    result = await callDoubaoChat(mode, messages, pin);
+    result = await callDoubaoChat(mode, messages, pin, requestId, 1, deadlineMs);
+    
+    if (!validateChatResponse(result).valid) {
+      const shouldRetry = isRetryableReason(result.fallbackReason);
+      const remainingMs = deadlineMs ? deadlineMs - Date.now() : AI_RETRY_MIN_REMAINING_MS + 1;
+      const hasBudgetForRetry = remainingMs > AI_RETRY_MIN_REMAINING_MS;
+      const isConfigError = isNonRetryableConfigError(result.fallbackReason);
+      
+      if (shouldRetry && !retried && hasBudgetForRetry && !isConfigError) {
+        aiLog('attempt', 'doubao retry', { id: requestId, attempt: 2, remainingMs });
+        retried = true;
+        result = await callDoubaoChat(mode, messages, pin, requestId, 2, deadlineMs);
+      } else if (!shouldRetry) {
+        aiLog('attempt', 'doubao no retry (non-retryable)', { id: requestId, rawReason: result.fallbackReason });
+      } else if (!hasBudgetForRetry) {
+        aiLog('attempt', 'doubao no retry (budget exhausted)', { id: requestId, remainingMs });
+      }
+    }
   }
 
   const validationResult = validateChatResponse(result);
-  console.log('[AI CHAT] Provider:', provider, '| Used fallback:', usedFallback, '| Valid:', validationResult.valid);
-  if (!validationResult.valid) {
-    console.warn('[AI CHAT] Response validation error:', validationResult.error);
-  }
+  aiLog('end', 'callAIChatWithFallback', { id: requestId, provider, usedFallback, valid: validationResult.valid });
   
   return { result, usedFallback, provider };
 }
@@ -2318,37 +2466,24 @@ export default async function handler(req, res) {
 
   const { mode, messages, pin } = req.body;
 
-  console.log('[AI CHAT] handler called with mode:', mode, 'messages count:', messages.length);
-  
-  // DEBUG STEP 1: At handler start
-  console.log('[DEBUG STEP 1] mode:', mode);
-  console.log('[DEBUG STEP 1] all user messages:', JSON.stringify(messages.filter(m => m.role === 'user').map(m => m.content)));
-  console.log('[DEBUG STEP 1] pin.reflectionDays:', pin?.reflectionDays);
+  // ── Request lifecycle tracking ──
+  const requestId = generateRequestId();
+  const handlerStartTime = Date.now();
+  const deadlineMs = handlerStartTime + AI_TOTAL_BUDGET_MS;
 
-  const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin);
-  
-  // DEBUG STEP 2: FULL RAW AI JSON response
-  console.log('[DEBUG STEP 2] FULL RAW AI JSON:', JSON.stringify(result, null, 2));
+  aiLog('start', 'handler', { id: requestId, mode, budgetMs: AI_TOTAL_BUDGET_MS, messagesCount: messages.length });
+
+  // ── Single call with budget-aware retry/fallback ──
+  // (callAIChatWithFallback now handles retry internally based on budget and error type)
+  const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin, requestId, deadlineMs);
 
   // Apply repair layer before validation to fix common formatting issues
   const repairedResult = repairChatResponse(result, mode);
-  
-  // DEBUG STEP 2B: After repairChatResponse()
-  console.log('[DEBUG STEP 2B] After repairChatResponse - analysis.reflectionDays:', repairedResult.analysis?.reflectionDays);
-  console.log('[DEBUG STEP 2B] After repairChatResponse - reply:', repairedResult.reply?.substring(0, 100));
 
+  // If still invalid after repair, use controlled fallback (no second full-length call)
   if (!validateChatResponse(repairedResult).valid) {
-    console.warn('[AI CHAT] First attempt returned invalid response, retrying once');
-    const retryResult = await callAIChatWithFallback(mode, messages, pin);
-    const repairedRetry = repairChatResponse(retryResult.result, mode);
-    if (validateChatResponse(repairedRetry).valid) {
-      Object.assign(repairedResult, repairedRetry);
-    }
-  }
-
-  if (!validateChatResponse(repairedResult).valid) {
-    console.warn('[AI CHAT] Retry also failed, using fallback');
-    Object.assign(repairedResult, fallbackResponseForReason(mode, 'retry_failed'));
+    aiLog('end', 'handler repair failed, using fallback', { id: requestId, mode });
+    Object.assign(repairedResult, fallbackResponseForReason(mode, 'retry_failed', requestId));
   }
 
   // Use repaired result for final response
@@ -2356,24 +2491,15 @@ export default async function handler(req, res) {
 
   // USER TIMELINE PRIORITY: Extract explicit timeline from user messages and override AI recommendation
   if (mode === 'pinning' && result.analysis && result.analysis.reflectionDays) {
-    // DEBUG STEP 3: Before USER TIMELINE PRIORITY override
-    console.log('[DEBUG STEP 3] result.analysis.reflectionDays before override:', result.analysis.reflectionDays);
-    
     const latestUserMessage = messages
-  .filter(m => m.role === 'user')
-  .at(-1)?.content || '';
+      .filter(m => m.role === 'user')
+      .at(-1)?.content || '';
 
-console.log('[DEBUG STEP 3] latest user message:', latestUserMessage);
-
-const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
-    console.log('[DEBUG STEP 3] extractReflectionDaysFromText(userMessages):', userTimelineDays);
+    const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
+    aiLog('timeline', 'pinning user override', { id: requestId, extracted: userTimelineDays, previous: result.analysis.reflectionDays });
     
     if (userTimelineDays !== null) {
-      console.log('[AI CHAT] User timeline override - AI recommended:', result.analysis.reflectionDays, '-> User specified:', userTimelineDays);
       result.analysis.reflectionDays = userTimelineDays;
-      
-      // DEBUG STEP 4: Immediately after override
-      console.log('[DEBUG STEP 4] result.analysis.reflectionDays after override:', result.analysis.reflectionDays);
     }
   }
 
@@ -2383,10 +2509,8 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
       .filter(m => m.role === 'user')
       .at(-1)?.content || '';
 
-    console.log('[REVIEW TIMELINE] latest user message:', latestUserMessage);
-
     const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
-    console.log('[REVIEW TIMELINE] extracted days:', userTimelineDays);
+    aiLog('timeline', 'review user override', { id: requestId, extracted: userTimelineDays });
 
     if (userTimelineDays !== null && userTimelineDays >= 1 && userTimelineDays <= 365) {
       // Ensure result.review is an object
@@ -2394,14 +2518,9 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
         result.review = {};
       }
 
-      const previousStructuredDays = result.review.nextReflectionDays ?? result.reviewDays;
-      console.log('[REVIEW TIMELINE] previous structured days:', previousStructuredDays);
-
       // Override both fields so frontend priority chain receives the user's explicit choice
       result.review.nextReflectionDays = userTimelineDays;
       result.reviewDays = userTimelineDays;
-
-      console.log('[REVIEW TIMELINE] final reviewDays:', result.reviewDays);
     }
   }
 
@@ -2415,12 +2534,12 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
       const previousCoreIssue = pin?.coreIssue || pin?.aiResult?.coreIssue;
       
       if (isUsableCoreIssue(previousCoreIssue)) {
-        console.log('[AI CHAT] Preserving previous coreIssue:', previousCoreIssue, '(new was unusable)');
+        aiLog('coreIssue', 'preserved previous', { id: requestId });
         result.analysis.coreIssue = previousCoreIssue;
       } else if (result.readyToPin) {
         // No previous valid title and readyToPin=true with unusable title
         // Set readyToPin=false to prevent creating a bad pin
-        console.log('[AI CHAT] No valid coreIssue available, setting readyToPin=false');
+        aiLog('coreIssue', 'no valid title, forcing readyToPin=false', { id: requestId });
         result.readyToPin = false;
       }
     }
@@ -2429,10 +2548,33 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
   // CONSISTENCY VALIDATION: Ensure reply timeline matches structured days after user override
   ensureReplyTimelineConsistency(result, mode);
 
-  // DEBUG STEP 5: Immediately before res.json(result)
-  console.log('[DEBUG STEP 5] final result.analysis.reflectionDays:', result.analysis?.reflectionDays);
-  console.log('[DEBUG STEP 5] final result.reply:', result.reply?.substring(0, 100));
+  // Attach requestId to response (not shown in chat UI)
+  result.requestId = requestId;
+
+  const totalMs = Date.now() - handlerStartTime;
+  aiLog('end', 'handler', { id: requestId, outcome: result.debugFallback ? 'fallback' : 'success', durationMs: totalMs, provider, usedFallback });
   
-  console.log('[AI CHAT] Final response - provider:', provider, '| usedFallback:', usedFallback);
   res.status(200).json(result);
 }
+
+// ── Test-safe exports ──────────────────────────────────────────────────
+// Internal helpers exported only for deterministic unit testing.
+// These do NOT expose secrets, prompts, or provider request bodies.
+// The handler itself is tested via mocked fetch/request/response.
+export const __testHelpers = {
+  classifyFallbackReason,
+  isRetryableReason,
+  isNonRetryableConfigError,
+  generateRequestId,
+  aiLog,
+  AI_LOG_ALLOWLIST,
+  AI_FUNCTION_MAX_DURATION_MS,
+  RESPONSE_RESERVE_MS,
+  AI_TOTAL_BUDGET_MS,
+  AI_FIRST_ATTEMPT_TIMEOUT_MS,
+  AI_RETRY_MIN_REMAINING_MS,
+  FALLBACK_RESPONSES,
+  fallbackResponseForReason,
+  extractReflectionDaysFromText,
+  isUsableCoreIssue
+};
