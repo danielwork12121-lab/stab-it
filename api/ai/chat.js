@@ -1658,31 +1658,63 @@ function numberToChinese(num) {
  * Only replaces the numeric part of conflicting timelines in reply text
  */
 function ensureReplyTimelineConsistency(response, mode) {
-  if (mode !== 'pinning') return response;
-  
-  if (!response.analysis || !response.analysis.reflectionDays || !response.reply) {
+  if (mode === 'pinning') {
+    if (!response.analysis || !response.analysis.reflectionDays || !response.reply) {
+      return response;
+    }
+    
+    const daysInReply = extractReflectionDaysFromText(response.reply);
+    
+    if (daysInReply !== null && daysInReply !== response.analysis.reflectionDays) {
+      console.warn('[AI CHAT] Reply/analysis timeline mismatch:', {
+        replyDays: daysInReply,
+        analysisDays: response.analysis.reflectionDays,
+        replyPreview: response.reply.substring(0, 80)
+      });
+      
+      // Precisely replace only the conflicting timeline number
+      // Support both Arabic (15天) and Chinese (十五天) numerals
+      const daysInReplyChinese = numberToChinese(daysInReply);
+      const analysisDaysChinese = numberToChinese(response.analysis.reflectionDays);
+      
+      // Match either Arabic or Chinese numeral followed by 天 + optional suffix
+      const timelinePattern = new RegExp(`(${daysInReply}|${daysInReplyChinese})\\s*天(后|再|回来|看看)?`, 'g');
+      response.reply = response.reply.replace(timelinePattern, `${analysisDaysChinese}天后`);
+      
+      console.log('[AI CHAT] Corrected reply timeline to:', response.analysis.reflectionDays);
+    }
+    
     return response;
   }
   
-  const daysInReply = extractReflectionDaysFromText(response.reply);
-  
-  if (daysInReply !== null && daysInReply !== response.analysis.reflectionDays) {
-    console.warn('[AI CHAT] Reply/analysis timeline mismatch:', {
-      replyDays: daysInReply,
-      analysisDays: response.analysis.reflectionDays,
-      replyPreview: response.reply.substring(0, 80)
-    });
+  if (mode === 'review') {
+    // For review mode, structured days = result.reviewDays (or review.nextReflectionDays)
+    const structuredDays = response.reviewDays ?? response.review?.nextReflectionDays;
     
-    // Precisely replace only the conflicting timeline number
-    // Support both Arabic (15天) and Chinese (十五天) numerals
-    const daysInReplyChinese = numberToChinese(daysInReply);
-    const analysisDaysChinese = numberToChinese(response.analysis.reflectionDays);
+    if (!structuredDays || !response.reply) {
+      return response;
+    }
     
-    // Match either Arabic or Chinese numeral followed by 天 + optional suffix
-    const timelinePattern = new RegExp(`(${daysInReply}|${daysInReplyChinese})\\s*天(后|再|回来|看看)?`, 'g');
-    response.reply = response.reply.replace(timelinePattern, `${analysisDaysChinese}天后`);
+    const daysInReply = extractReflectionDaysFromText(response.reply);
     
-    console.log('[AI CHAT] Corrected reply timeline to:', response.analysis.reflectionDays);
+    if (daysInReply !== null && daysInReply !== structuredDays) {
+      console.warn('[AI CHAT] Reply/review timeline mismatch:', {
+        replyDays: daysInReply,
+        structuredDays: structuredDays,
+        replyPreview: response.reply.substring(0, 80)
+      });
+      
+      // Precisely replace only the conflicting timeline number in the reply
+      const daysInReplyChinese = numberToChinese(daysInReply);
+      const structuredDaysChinese = numberToChinese(structuredDays);
+      
+      const timelinePattern = new RegExp(`(${daysInReply}|${daysInReplyChinese})\\s*天(后|再|回来|看看)?`, 'g');
+      response.reply = response.reply.replace(timelinePattern, `${structuredDaysChinese}天后`);
+      
+      console.log('[AI CHAT] Corrected review reply timeline to:', structuredDays);
+    }
+    
+    return response;
   }
   
   return response;
@@ -2345,6 +2377,34 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
     }
   }
 
+  // REVIEW USER TIMELINE PRIORITY: Extract explicit timeline from latest user message and override review days
+  if (mode === 'review') {
+    const latestUserMessage = messages
+      .filter(m => m.role === 'user')
+      .at(-1)?.content || '';
+
+    console.log('[REVIEW TIMELINE] latest user message:', latestUserMessage);
+
+    const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
+    console.log('[REVIEW TIMELINE] extracted days:', userTimelineDays);
+
+    if (userTimelineDays !== null && userTimelineDays >= 1 && userTimelineDays <= 365) {
+      // Ensure result.review is an object
+      if (!result.review || typeof result.review !== 'object') {
+        result.review = {};
+      }
+
+      const previousStructuredDays = result.review.nextReflectionDays ?? result.reviewDays;
+      console.log('[REVIEW TIMELINE] previous structured days:', previousStructuredDays);
+
+      // Override both fields so frontend priority chain receives the user's explicit choice
+      result.review.nextReflectionDays = userTimelineDays;
+      result.reviewDays = userTimelineDays;
+
+      console.log('[REVIEW TIMELINE] final reviewDays:', result.reviewDays);
+    }
+  }
+
   // CORE ISSUE STABILITY: Preserve previous valid coreIssue when new one is unusable
   if (mode === 'pinning' && result.analysis) {
     const newCoreIssue = result.analysis.coreIssue;
@@ -2366,7 +2426,7 @@ const userTimelineDays = extractReflectionDaysFromText(latestUserMessage);
     }
   }
 
-  // CONSISTENCY VALIDATION: Ensure reply timeline matches analysis.reflectionDays after user override
+  // CONSISTENCY VALIDATION: Ensure reply timeline matches structured days after user override
   ensureReplyTimelineConsistency(result, mode);
 
   // DEBUG STEP 5: Immediately before res.json(result)

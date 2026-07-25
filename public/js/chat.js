@@ -1488,33 +1488,43 @@ function processChatAIResponse(aiResponse) {
       const reviewDays = aiResponse.reviewDays;
       const apiDays = aiResponse.review?.nextReflectionDays;
 
-      // Validate reviewDays: must be a finite positive whole number
-      const isValidReviewDays = reviewDays !== null &&
-                                reviewDays !== undefined &&
-                                Number.isFinite(reviewDays) &&
-                                reviewDays > 0 &&
-                                Math.floor(reviewDays) === reviewDays;
+      // Helper: validate a review days value as a finite whole integer from 1 to 365
+      const isValidReviewDaysValue = (v) =>
+        v !== null &&
+        v !== undefined &&
+        Number.isFinite(v) &&
+        v >= 1 &&
+        v <= 365 &&
+        Math.floor(v) === v;
+
+      // Validate reviewDays: must be a finite positive whole number from 1 to 365
+      const isValidReviewDays = isValidReviewDaysValue(reviewDays);
+      // Validate apiDays too so we don't fall through to pin.reflectionDays with a bad value
+      const isValidApiDays = isValidReviewDaysValue(apiDays);
 
       // Determine the final days value
+      // IMPORTANT: do NOT mutate pin.reflectionDays here. rescheduleReview() is the single commit point.
       let nextReflectionDays;
       if (isValidReviewDays) {
         nextReflectionDays = reviewDays;
-        // Update pin.reflectionDays with the new value
-        pin.reflectionDays = reviewDays;
-        UserStorage.updateUser(currentUser);
-        UserStorage.setCurrentUser(currentUser.username);
         if (DEV_MODE) {
           console.log('[REVIEW DAYS DEBUG] AI reviewDays received:', reviewDays);
-          console.log('[REVIEW DAYS DEBUG] pin reflectionDays updated:', reviewDays);
+          console.log('[REVIEW DAYS DEBUG] pin reflectionDays NOT updated (pending click):', pin?.reflectionDays);
+        }
+      } else if (isValidApiDays) {
+        nextReflectionDays = apiDays;
+        if (DEV_MODE) {
+          console.log('[REVIEW DAYS DEBUG] apiDays used:', apiDays);
+          console.log('[REVIEW DAYS DEBUG] pin reflectionDays NOT updated (pending click):', pin?.reflectionDays);
         }
       } else {
-        // Fall back to existing sources
-        nextReflectionDays = apiDays ?? pin?.reflectionDays ?? 5;
+        // Fall back to existing stored pin value, then hardcoded 5
+        nextReflectionDays = pin?.reflectionDays ?? 5;
+        if (DEV_MODE) {
+          console.log('[REVIEW DAYS DEBUG] invalid/missing reviewDays and apiDays, fallback to pin.reflectionDays:', nextReflectionDays);
+        }
         if (reviewDays !== null && reviewDays !== undefined && !isValidReviewDays) {
           if (DEV_MODE) console.log('[REVIEW DAYS DEBUG] invalid reviewDays ignored:', reviewDays);
-        }
-        if (!isValidReviewDays && reviewDays === null) {
-          if (DEV_MODE) console.log('[REVIEW DAYS DEBUG] previous value retained:', nextReflectionDays);
         }
       }
 
@@ -1523,8 +1533,8 @@ function processChatAIResponse(aiResponse) {
       if (DEV_MODE) {
         console.log('[AI RESPONSE DEBUG] =========================');
         console.log('[AI RESPONSE DEBUG] API reviewDays:', reviewDays, '(valid:', isValidReviewDays, ')');
-        console.log('[AI RESPONSE DEBUG] API nextReflectionDays:', apiDays);
-        console.log('[AI RESPONSE DEBUG] final nextReflectionDays:', nextReflectionDays, '(source:', isValidReviewDays ? 'reviewDays' : apiDays !== null && apiDays !== undefined ? 'api' : pin?.reflectionDays ? 'pin' : 'default', ')');
+        console.log('[AI RESPONSE DEBUG] API nextReflectionDays:', apiDays, '(valid:', isValidApiDays, ')');
+        console.log('[AI RESPONSE DEBUG] final nextReflectionDays:', nextReflectionDays, '(source:', isValidReviewDays ? 'reviewDays' : isValidApiDays ? 'api' : pin?.reflectionDays ? 'pin' : 'default', ')');
         console.log('[AI RESPONSE DEBUG] reviewStage:', currentUser.reviewStage);
       }
 
