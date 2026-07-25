@@ -1753,29 +1753,38 @@ function removeReviewedNeedleWithAnimation() {
 function showPostRemovalScreen(currentUser) {
   const remainingCompleted = currentUser.painPins.filter(p => p.completed || p.hasNeedle);
 
-  if (remainingCompleted.length > 0) {
-    const nextPin = remainingCompleted[0];
-    const fastForwardDays = nextPin?.reflectionDays || DEMO_FAST_FORWARD_DAYS;
+  const earliestPin = window.findEarliestScheduledNeedle?.();
+  const currentDay = getCurrentCompanionDay();
 
+  if (earliestPin) {
+    const daysUntilReview = earliestPin.reviewDay - currentDay;
+    
     const demoMessage = document.createElement('div');
     demoMessage.className = 'summary-line';
-    demoMessage.textContent = `为了演示回顾功能，快进到 ${fastForwardDays} 天后，看看你是否已经准备好放下这针烦恼。`;
+    demoMessage.textContent = daysUntilReview <= 0 
+      ? '现在回看下一根针，看看你是否已经准备好放下这针烦恼。'
+      : `快进到 ${daysUntilReview} 天后，回看下一根针。`;
     demoMessage.style.fontSize = '18px';
     demoMessage.style.opacity = '0.9';
 
     const fastForwardBtn = document.createElement('button');
     fastForwardBtn.className = 'summary-btn';
-    fastForwardBtn.textContent = `快进 ${fastForwardDays} 天`;
+    fastForwardBtn.textContent = daysUntilReview <= 0 
+      ? '现在回看'
+      : `快进 ${daysUntilReview} 天`;
 
     fastForwardBtn.addEventListener('click', () => {
       if (DEV_MODE) {
         console.log('[FAST FORWARD DEBUG] =========================');
         console.log('[FAST FORWARD DEBUG] button clicked (post-removal)');
-        console.log('[FAST FORWARD DEBUG] selected pin id:', nextPin?.id);
-        console.log('[FAST FORWARD DEBUG] selected reflectionDays:', fastForwardDays);
+        console.log('[FAST FORWARD DEBUG] selected pin id:', earliestPin.id);
+        console.log('[FAST FORWARD DEBUG] reviewDay:', earliestPin.reviewDay);
+        console.log('[FAST FORWARD DEBUG] daysUntilReview:', daysUntilReview);
       }
 
-      fastForwardCompanionDays(fastForwardDays);
+      if (daysUntilReview > 0) {
+        fastForwardCompanionDays(daysUntilReview);
+      }
 
       window.STABIT_MODE = 'reviewNeedle';
       window.STABIT_CHAT_MODE = null;
@@ -1791,8 +1800,8 @@ function showPostRemovalScreen(currentUser) {
 
       setTimeout(() => {
         if (window.showReviewPanel) {
-          window.showReviewPanel();
-          if (DEV_MODE) console.log('[FAST FORWARD DEBUG] showReviewPanel called: true');
+          window.showReviewPanel(earliestPin.id);
+          if (DEV_MODE) console.log('[FAST FORWARD DEBUG] showReviewPanel called with pinId:', earliestPin.id);
         } else {
           if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: showReviewPanel is not available');
         }
@@ -2302,8 +2311,20 @@ function animatePin() {
         targetPin.hasNeedle = true;
         targetPin.isAnimating = false;
 
+        const validReflectionDays =
+          Number.isInteger(Number(targetPin.reflectionDays)) &&
+          Number(targetPin.reflectionDays) >= 1 &&
+          Number(targetPin.reflectionDays) <= 365
+            ? Number(targetPin.reflectionDays)
+            : 5;
+
+        if (!Number.isFinite(targetPin.reviewDay)) {
+          const currentDay = getCurrentCompanionDay();
+          targetPin.reviewDay = currentDay + validReflectionDays;
+        }
+
         if (DEV_MODE) {
-          console.log('[PIN DEBUG] animatePin() - pin:', targetPin.id, 'completed:', targetPin.completed, 'hasNeedle:', targetPin.hasNeedle, 'chatHistory length:', targetPin.chatHistory?.length || 0);
+          console.log('[PIN DEBUG] animatePin() - pin:', targetPin.id, 'completed:', targetPin.completed, 'hasNeedle:', targetPin.hasNeedle, 'reviewDay:', targetPin.reviewDay, 'chatHistory length:', targetPin.chatHistory?.length || 0);
         }
 
         UserStorage.updateUser(freshUser);
@@ -2362,32 +2383,55 @@ function showSummaryPanel() {
     secondaryEl.remove();
     buttonsContainer.remove();
 
-    const chatPin = getCurrentChatPin();
-    const reviewDays = chatPin?.reflectionDays || DEMO_FAST_FORWARD_DAYS;
-
+    const earliestPin = window.findEarliestScheduledNeedle?.();
+    const currentDay = getCurrentCompanionDay();
+    
+    if (!earliestPin) {
+      // No eligible pins
+      const demoMessage = document.createElement('div');
+      demoMessage.className = 'summary-line';
+      demoMessage.textContent = '目前没有需要回顾的烦恼。继续陪伴你度过每一天。';
+      demoMessage.style.fontSize = '18px';
+      demoMessage.style.opacity = '0.9';
+      demoMessage.style.marginTop = '10px';
+      
+      const demoContainer = document.createElement('div');
+      demoContainer.style.display = 'flex';
+      demoContainer.style.flexDirection = 'column';
+      demoContainer.style.alignItems = 'center';
+      demoContainer.style.gap = '20px';
+      demoContainer.style.marginTop = '10px';
+      
+      demoContainer.appendChild(demoMessage);
+      summaryPanel.appendChild(demoContainer);
+      return;
+    }
+    
+    const daysUntilReview = earliestPin.reviewDay - currentDay;
+    
     const demoMessage = document.createElement('div');
     demoMessage.className = 'summary-line';
-    demoMessage.textContent = `为了演示回顾功能，快进到 ${reviewDays} 天后，看看你是否已经准备好放下这针烦恼。`;
+    demoMessage.textContent = daysUntilReview <= 0 
+      ? '现在回看下一根针，看看你是否已经准备好放下这针烦恼。'
+      : `快进到 ${daysUntilReview} 天后，回看下一根针。`;
     demoMessage.style.fontSize = '18px';
     demoMessage.style.opacity = '0.9';
     demoMessage.style.marginTop = '10px';
-
+    
     const fastForwardBtn = document.createElement('button');
     fastForwardBtn.className = 'summary-btn';
-    fastForwardBtn.textContent = `快进 ${reviewDays} 天`;
+    fastForwardBtn.textContent = daysUntilReview <= 0 
+      ? '现在回看'
+      : `快进 ${daysUntilReview} 天`;
     fastForwardBtn.style.marginTop = '5px';
 
     fastForwardBtn.addEventListener('click', () => {
       if (DEV_MODE) {
         console.log('[FAST FORWARD DEBUG] =========================');
         console.log('[FAST FORWARD DEBUG] button clicked');
-        console.log('[FAST FORWARD DEBUG] selected pin id:', chatPin?.id);
-        console.log('[FAST FORWARD DEBUG] selected reflectionDays:', reviewDays);
-      }
-
-      if (!chatPin) {
-        if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: No chat pin found');
-        return;
+        console.log('[FAST FORWARD DEBUG] selected pin id:', earliestPin.id);
+        console.log('[FAST FORWARD DEBUG] reviewDay:', earliestPin.reviewDay);
+        console.log('[FAST FORWARD DEBUG] daysUntilReview:', daysUntilReview);
       }
 
       const currentUser = getCurrentUser();
@@ -2398,10 +2442,11 @@ function showSummaryPanel() {
 
       if (DEV_MODE) {
         console.log('[FAST FORWARD DEBUG] companionDayOffset before:', currentUser.companionDayOffset || 0);
-        console.log('[FAST FORWARD DEBUG] STABIT_MODE before:', window.STABIT_MODE);
       }
 
-      fastForwardCompanionDays(reviewDays);
+      if (daysUntilReview > 0) {
+        fastForwardCompanionDays(daysUntilReview);
+      }
 
       if (DEV_MODE) {
         console.log('[FAST FORWARD DEBUG] companionDayOffset after:', currentUser.companionDayOffset || 0);
@@ -2410,11 +2455,6 @@ function showSummaryPanel() {
       window.STABIT_MODE = 'reviewNeedle';
       window.STABIT_CHAT_MODE = null;
 
-      if (DEV_MODE) {
-        console.log('[FAST FORWARD DEBUG] STABIT_MODE after:', window.STABIT_MODE);
-        console.log('[FAST FORWARD DEBUG] STABIT_CHAT_MODE after:', window.STABIT_CHAT_MODE);
-      }
-
       const existingBadge = chatScreen.querySelector('.day-badge');
       if (existingBadge) {
         existingBadge.textContent = '💗 陪伴第 ' + getCompanionDays() + ' 天';
@@ -2422,14 +2462,13 @@ function showSummaryPanel() {
 
       if (DEV_MODE) {
         console.log('[FAST FORWARD DEBUG] opening review panel directly');
-        console.log('[FAST FORWARD DEBUG] selected pin id:', chatPin.id);
-        console.log('[FAST FORWARD DEBUG] selected reflectionDays:', reviewDays);
+        console.log('[FAST FORWARD DEBUG] selected pin id:', earliestPin.id);
       }
 
       setTimeout(() => {
         if (window.showReviewPanel) {
-          window.showReviewPanel(chatPin.id);
-          if (DEV_MODE) console.log('[FAST FORWARD DEBUG] showReviewPanel called with pinId:', chatPin.id);
+          window.showReviewPanel(earliestPin.id);
+          if (DEV_MODE) console.log('[FAST FORWARD DEBUG] showReviewPanel called with pinId:', earliestPin.id);
         } else {
           if (DEV_MODE) console.error('[FAST FORWARD DEBUG] ERROR: showReviewPanel is not available');
         }

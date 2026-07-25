@@ -169,6 +169,7 @@ function findEarliestScheduledNeedle() {
     return earliest;
   }, null);
 }
+window.findEarliestScheduledNeedle = findEarliestScheduledNeedle;
 
 function restoreChatPanel() {
   const existingPanel = chatScreen.querySelector('.summary-panel');
