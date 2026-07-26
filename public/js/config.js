@@ -26,7 +26,7 @@ const ASSETS = {
   chatBg: '/assets/chat/chat-background.JPG',
   painDot: '/assets/chat/pain-dot.png',
   pinStuck: '/assets/pin/pin-stuck.png',
-  backgroundMusic: '/assets/audio/background-music.wav',
+  backgroundMusic: '/assets/audio/background-music.mp3',
   pinImpactSound: '/assets/audio/pin-impact.qta',
   celebrationSound: '/assets/audio/celebration.m4a'
 };
