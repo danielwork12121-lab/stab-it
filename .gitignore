@@ -17,3 +17,6 @@ build/
 .idea/
 .vercel
 .env*
+
+# Keep the safe environment-variable template tracked
+!.env.example
