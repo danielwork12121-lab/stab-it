@@ -5,6 +5,8 @@ const AudioManager = {
   bgmStarted: false,
   isUnlocked: false,
   lastCelebrationPlay: 0,
+  _unlockListenersAttached: false,
+  _unlockAttemptInFlight: false,
 
   initAudio() {
     try {
@@ -29,8 +31,24 @@ const AudioManager = {
       this.celebrationAudio.addEventListener('error', (e) => {
         if (DEV_MODE) console.error('[AUDIO] Celebration sound load error:', e);
       });
-      
-      this.setupUnlockListeners();
+
+      this.bgm.play().then(() => {
+        this.bgmStarted = true;
+        if (DEV_MODE) {
+          console.log('[AUDIO] BGM autoplay succeeded');
+        }
+      }).catch((err) => {
+        if (DEV_MODE) {
+          console.warn('[AUDIO] BGM autoplay blocked:', err.name || err.message);
+        }
+        this.setupUnlockListeners();
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && this.bgm && this.bgmStarted && this.bgm.paused) {
+          this.bgm.play().catch(() => {});
+        }
+      });
       
       if (DEV_MODE) {
         console.log('[AUDIO] initialized');
@@ -42,26 +60,70 @@ const AudioManager = {
     }
   },
 
-  setupUnlockListeners() {
-    const unlock = (e) => {
-      if (this.isUnlocked) return;
-      
-      this.isUnlocked = true;
-      
-      if (DEV_MODE) {
-        console.log('[AUDIO] first gesture detected:', e.type);
+  // Browser autoplay policy blocks bgm.play() until a real user gesture.
+    // The Audio element itself can be created anywhere; the constraint is the
+    // play() permission and the retry path after autoplay is denied.
+    // One physical tap fires pointerdown/touchstart/click in sequence, so
+    // _unlockAttemptInFlight prevents concurrent play() calls.
+    setupUnlockListeners() {
+    if (this._unlockListenersAttached) return;
+    this._unlockListenersAttached = true;
+
+    const tryPlay = (e) => {
+      if (!this.bgm || this.bgmStarted) {
+        this._removeUnlockListeners();
+        return;
       }
-      
-      this.startBackgroundMusic();
-      
-      document.removeEventListener('click', unlock);
-      document.removeEventListener('touchstart', unlock);
-      document.removeEventListener('keydown', unlock);
+
+      if (this._unlockAttemptInFlight) {
+        if (DEV_MODE) {
+          console.log('[AUDIO] unlock attempt in-flight, skipping duplicate gesture');
+        }
+        return;
+      }
+
+      if (DEV_MODE) {
+        console.log('[AUDIO] unlock gesture:', e.type);
+      }
+
+      this._unlockAttemptInFlight = true;
+
+      this.bgm.play().then(() => {
+        this._unlockAttemptInFlight = false;
+        this.bgmStarted = true;
+        this.isUnlocked = true;
+        this._removeUnlockListeners();
+        if (DEV_MODE) {
+          console.log('[AUDIO] BGM unlocked successfully');
+        }
+      }).catch((err) => {
+        this._unlockAttemptInFlight = false;
+        if (DEV_MODE) {
+          console.warn('[AUDIO] unlock retry failed:', err.name || err.message);
+        }
+      });
     };
-    
-    document.addEventListener('click', unlock, { once: true });
-    document.addEventListener('touchstart', unlock, { once: true });
-    document.addEventListener('keydown', unlock, { once: true });
+
+    this._unlockHandler = tryPlay;
+
+    document.addEventListener('pointerdown', tryPlay);
+    document.addEventListener('touchstart', tryPlay);
+    document.addEventListener('click', tryPlay);
+    document.addEventListener('keydown', tryPlay);
+
+    if (DEV_MODE) {
+      console.log('[AUDIO] audio unlock listeners attached');
+    }
+  },
+
+  _removeUnlockListeners() {
+    if (!this._unlockHandler) return;
+    document.removeEventListener('pointerdown', this._unlockHandler);
+    document.removeEventListener('touchstart', this._unlockHandler);
+    document.removeEventListener('click', this._unlockHandler);
+    document.removeEventListener('keydown', this._unlockHandler);
+    this._unlockHandler = null;
+    this._unlockListenersAttached = false;
   },
 
   startBackgroundMusic() {
@@ -69,20 +131,22 @@ const AudioManager = {
       if (DEV_MODE && !this.bgm) console.warn('[AUDIO] bg play attempted - bgm is null');
       return;
     }
-    
-    this.bgmStarted = true;
-    
+
     if (DEV_MODE) {
       console.log('[AUDIO] bg play attempted');
     }
-    
+
     this.bgm.play().then(() => {
+      this.bgmStarted = true;
       if (DEV_MODE) {
         console.log('[AUDIO] bg play success');
       }
     }).catch((err) => {
       if (DEV_MODE) {
-        console.warn('[AUDIO] bg play fail:', err.message);
+        console.warn('[AUDIO] bg play fail:', err.name || err.message);
+      }
+      if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
+        this.setupUnlockListeners();
       }
     });
   },
