@@ -179,7 +179,7 @@ pm2 reload stabit
 ## Dual-Deployment with Vercel
 
 Vercel continues to serve the same repository via serverless functions. Both deployments share:
-- Identical `api/ai/chat.js` and `api/ai/analyze-worry.js` handlers
+- Identical `api/ai/chat.js` handler
 - Identical `public/` frontend
 - Identical AI prompts and response schemas
 

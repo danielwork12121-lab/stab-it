@@ -63,29 +63,37 @@ DO NOT: Create custom coordinate normalization; bypass savePainDot()
 --- TRANSITION 5: PINNING CHAT SEND ---
 Trigger: User clicks sendBtn or presses Enter
 First: sendMessage() [chat.js]
-Follow-up: addMessage('user'), saveMessage(), addMessage('bot', '…'), callAIChat(), processChatAIResponse(), analyzeWorryWithAI() (if not analyzed)
+Follow-up: addMessage('user'), saveMessage(), addMessage('bot', '…'), callAIChat(), processChatAIResponse()
 State read: getCurrentUser(), getCurrentChatPin(), STABIT_CHAT_MODE
-State mutated: pin.chatHistory.push({sender, text, createdAt}), pin.aiAnalyzing=true
-API: POST /api/ai/chat (mode: "pinning", 3min timeout), POST /api/ai/analyze-worry (15s timeout)
-UI: User message; "..." loading bubble; AI reply replaces bubble; background analysis has no UI
-DO NOT: Create custom message saving; bypass callAIChat()
+State mutated: pin.chatHistory.push({sender, text, createdAt})
+API: POST /api/ai/chat (mode: "pinning", 3min timeout) — single call returns reply + analysis
+UI: User message; "..." loading bubble; AI reply replaces bubble
+DO NOT: Create custom message saving; bypass callAIChat(); add a second AI call for analysis
 
---- TRANSITION 6: /api/ai/analyze-worry API ---
-Trigger: Pinning mode, pin.aiAnalyzed=false
-First: analyzeWorryWithAI(userText) [chat.js]
-Follow-up: processAIResult(aiResult) [chat.js]
-State read: getCurrentChatPin(), getCurrentUser()
-State mutated: pin.coreIssue, pin.reflectionDays, pin.warmExplanation, pin.currentGuides, pin.aiResult, pin.aiAnalyzed=true, pin.aiAnalyzing=false, pin.aiAnalyzedAt, pin.reviewReadyAfterDays
-API: POST /api/ai/analyze-worry
-UI: No visual change
-DO NOT: Call in review mode; create fake chat messages; bypass processAIResult()
+--- TRANSITION 6: CENTRALIZED MEMORY (V1) ---
+Trigger: callAIChat() builds the request body [chat.js]
+First: buildMemoryContext(currentUser, currentPinId, userText, mode) [memory.js]
+Behavior:
+  - Pinning mode only; returns null in review mode
+  - Local deterministic similarity lookup from existing pins (painPins + resolvedPins, excluding current pin)
+  - Skips vague/generic input (e.g., "今天有点烦", greetings)
+  - Returns null when no match; null results are NOT cached
+  - Max 2 related memories; formatted as compact background context string
+  - Session-cached per username:pinId (only actual context, never null)
+  - Cache cleared on logout/reset via clearMemoryCache()
+  - NO extra AI/network call — purely local keyword + theme-group similarity
+State read: currentUser.painPins, currentUser.resolvedPins, currentUser.username
+State mutated: None (read-only lookup; cache is transient runtime state)
+API: None (added to /api/ai/chat request as optional "memoryContext" field)
+UI: None (influences AI conversation context only, not workflow mechanics)
+DO NOT: Add a separate API call for memory; cache null results; leak cache across users
 
 --- TRANSITION 7: /api/ai/chat PINNING RESPONSE ---
 Trigger: Backend returns pinning AI response
 First: handler() [api/ai/chat.js]
 Follow-up: callAIChatWithFallback() → repairChatResponse() → validateChatResponse() → USER TIMELINE OVERRIDE (extractReflectionDaysFromText() on user messages) → processChatAIResponse(aiResponse) [chat.js]
 State read: getCurrentUser(), getCurrentChatPin(), STABIT_CHAT_MODE, aiResponse.analysis.reflectionDays
-State mutated: (if analysis) same as transition 6; (if readyToPin) pendingAction='pin'; reflectionDays may be overridden by user-specified timeline
+State mutated: (if analysis) pin.coreIssue, pin.reflectionDays, pin.warmExplanation, pin.currentGuides, pin.aiAnalyzed=true; (if readyToPin) pendingAction='pin'; reflectionDays may be overridden by user-specified timeline
 API: POST /api/ai/chat
 UI: readyToPin=false → AI reply only; readyToPin=true → AI reply + two review-style buttons: "继续聊" + "交给悠悠，X天后再看看"
 TIMELINE PRIORITY: User explicit timeline > AI estimate (e.g., "15天后" overrides AI's 7-day recommendation)
@@ -122,24 +130,24 @@ DO NOT: Route through home screen; create separate day increment
 --- TRANSITION 10: REVIEW PANEL ---
 Trigger: showReviewPanel() called
 First: showReviewPanel() [scenes.js]
-Follow-up: findOldestCompletedNeedle() [scenes.js], create 3 buttons:
-  - "会，它还会影响我" → enterReviewChat(pinId, '会，它还会影响我。')
-  - "有一点儿，但是没当时那么难受了" → enterReviewChat(pinId, '有一点儿...')
-  - "不会了，好像已经忘记这件事儿了" → directRemoveNeedle(pinId)
+Follow-up: finds earliest reviewable pin via inline .find() on painPins, create 3 buttons:
+  - "仍然影响我" → enterReviewChat(pinId, '会，它还会影响我。')
+  - "有些影响" → enterReviewChat(pinId, '有一点儿，但是没当时那么难受了。')
+  - "已经放下" → directRemoveNeedle(pinId)
 State read: painPins, pin.coreIssue, pin.chatHistory
 State mutated: None
 API: None
 UI: Summary panel with core issue; question "现在，它还影响着你的情绪吗？"; three purple buttons
-DO NOT: Create custom review panel; bypass findOldestCompletedNeedle()
+DO NOT: Create custom review panel; bypass showReviewPanel()
 
---- TRANSITION 11: DIRECT RELEASE ("不会了...") ---
-Trigger: User clicks "不会了，好像已经忘记这件事儿了"
+--- TRANSITION 11: DIRECT RELEASE ("已经放下") ---
+Trigger: User clicks "已经放下"
 First: directRemoveNeedle(pinId) [scenes.js]
-Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(500ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), window.STABIT_MODE=null, window.STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, showHomeScreen()
+Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(500ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), completePinRemoval() [scenes.js]
 State read: painPins (find by pinId)
-State mutated: pin moved from painPins to resolvedPins (preserving chatHistory); resolvedPin.status='resolved', resolvedAt, hasNeedle=false; activePinId=null; reviewingPinId=null; pendingAction=null; pendingReviewAction=null; STABIT_MODE=null
+State mutated: pin moved from painPins to resolvedPins (preserving chatHistory); resolvedPin.status='resolved', resolvedAt, hasNeedle=false; activePinId=null; reviewingPinId=null
 API: None
-UI: Chat fades; needle animates down (1200ms); ripple; home screen shown
+UI: Chat fades; needle animates down (1200ms); ripple; then converges into TRANSITION 19 celebration block
 DO NOT: Create separate removal logic; bypass archiveAndRemovePin(); forget celebration effects
 
 --- TRANSITION 12: REVIEW CHAT ENTRY ---
@@ -168,23 +176,24 @@ First: sendMessage() [chat.js]
 Follow-up: addMessage('user'), saveMessage(), (if reviewStage='awaiting_user_reason') reviewStage='followup_response', addMessage('bot', '…'), callAIChat()
 State read: STABIT_CHAT_MODE='review', reviewStage
 State mutated: (if reviewStage='awaiting_user_reason') reviewStage='followup_response'
-API: POST /api/ai/chat (mode: "review"); NO analyze-worry
+API: POST /api/ai/chat (mode: "review")
 UI: User message; loading; AI responds with analysis
-DO NOT: Call analyze-worry in review mode
+DO NOT: Add a second AI call for analysis in review mode
 
 --- TRANSITION 15: REVIEW API RESPONSE ---
 Trigger: Backend returns review AI response
 First: processChatAIResponse(aiResponse) [chat.js]
-Response schema: reply, readyToPin=false, readyToRemove, review.stillAffectsUser, review.reasonCategory, review.nextReflectionDays
-Follow-up: addMessage('bot', reply), saveMessage(), (if readyToRemove) pendingAction='remove' → addActionButton('轻轻取下这根针', removeReviewedNeedleWithAnimation), (if !readyToRemove && nextReflectionDays) reviewStage='review_conversation' → pendingAction='review_reschedule' → addReviewChoiceButtons()
+Response schema: reply, readyToPin=false, readyToRemove, review.stillAffectsUser, review.reasonCategory, review.nextReflectionDays, reviewDays (top-level, optional)
+Follow-up: addMessage('bot', reply), saveMessage(), (if readyToRemove) pendingAction='remove' → addActionButton('我想取下针', removeReviewedNeedleWithAnimation), (if !readyToRemove && nextReflectionDays) reviewStage='review_conversation' → pendingAction='review_reschedule' → addReviewChoiceButtons()
+Days priority: reviewDays (top-level) > review.nextReflectionDays > pin.reflectionDays
 State read: STABIT_CHAT_MODE='review', currentUser
 State mutated: pendingAction, pendingReviewAction, reviewStage
 API: None
-UI: readyToRemove=true → "轻轻取下这根针"; !readyToRemove + nextReflectionDays → "继续聊聊" + "X天后再看看"
+UI: readyToRemove=true → "我想取下针"; !readyToRemove + nextReflectionDays → "继续聊" + "X天后看" + "我想取下针"
 DO NOT: Create custom review response handling
 
---- TRANSITION 16: "继续聊聊" BUTTON ---
-Trigger: User clicks "继续聊聊"
+--- TRANSITION 16: "继续聊" BUTTON ---
+Trigger: User clicks "继续聊"
 First: continueBtn.addEventListener('click', ...) [chat.js]
 Follow-up: Remove .chat-action-button elements, pendingAction=null, pendingReviewAction=null
 State read: chatLog, getCurrentUser()
@@ -193,8 +202,8 @@ API: None
 UI: Choice buttons removed; stay in review chat
 DO NOT: Mutate pin schedule; archive pin; navigate away
 
---- TRANSITION 17: "X天后再看看" BUTTON ---
-Trigger: User clicks "X天后再看看"
+--- TRANSITION 17: "X天后看" BUTTON ---
+Trigger: User clicks "X天后看"
 First: rescheduleReview(nextReflectionDays, reviewData) [chat.js]
 Follow-up: getCurrentCompanionDay(), update pin fields: lastReviewedAt, lastReviewedDay, reviewCount++, reflectionDays=validDays, reviewDay=currentDay+validDays, latestReview, reviewHistory.push({...}), clear review state: reviewingPinId=null, pendingAction=null, pendingReviewAction=null, reviewStage=null, window.reviewingPinId=null, STABIT_CHAT_MODE=null, showHomeScreen()
 State read: getCurrentUser(), getCurrentCompanionDay(), pin.reviewCount, pin.reviewHistory
@@ -203,36 +212,36 @@ API: None
 UI: Return to home; needle remains visible
 DO NOT: Remove/archive pin; forget to clear review state
 
---- TRANSITION 18: REVIEW REMOVE BUTTON ("轻轻取下这根针") ---
-Trigger: User clicks "轻轻取下这根针"
+--- TRANSITION 18: REVIEW REMOVE BUTTON ("我想取下针") ---
+Trigger: User clicks "我想取下针"
 First: removeReviewedNeedleWithAnimation() [chat.js]
-Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(450ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), window.STABIT_MODE=null, window.STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, chatPanel.remove(), showHomeScreen()
+Follow-up: chatPanel.addClass('review-chat-fade-out'), setTimeout(450ms) → ripple + needle-fade-away, setTimeout(1250ms) → archiveAndRemovePin(), window.STABIT_CHAT_MODE='pinning', window.reviewingPinId=null, chatPanel.remove(), completePinRemoval() [scenes.js]
 State read: reviewingPinId or window.reviewingPinId, painPins
-State mutated: pin moved to resolvedPins; activePinId=null; reviewingPinId=null; STABIT_CHAT_MODE='pinning'; STABIT_MODE=null
+State mutated: pin moved to resolvedPins; activePinId=null; reviewingPinId=null
 API: None
-UI: Same animation as transition 11
+UI: Same animation as transition 11; then converges into TRANSITION 19 celebration block
 DO NOT: Create separate removal animation
 
---- TRANSITION 19: UNIVERSAL CELEBRATION BLOCK ---
+--- TRANSITION 19: UNIVERSAL CELEBRATION BLOCK (completePinRemoval) ---
 Trigger: ANY successful pin removal (directRemoveNeedle or removeReviewedNeedleWithAnimation)
-Note: Removal entry paths may differ, but successful removal always converges into the same completion block.
-First: showReleaseConfettiOverlay() [chat.js]
-Follow-up: showReleaseCelebrationText() [chat.js], AudioManager.playCelebrationSound() [audio.js]
+Note: All removal paths converge into completePinRemoval() [scenes.js], which runs the celebration block.
+First: completePinRemoval() → showHomeScreen(), showReleaseConfettiOverlay() [chat.js]
+Follow-up: showReleaseCelebrationText() [chat.js], AudioManager.playCelebrationSound() [audio.js], setTimeout(2800ms) → currentUser.showReviewShortcut=true → renderReviewShortcut() [scenes.js]
 State read: None
-State mutated: None (celebration is visual/audio only)
+State mutated: showReviewShortcut=true (after 2.8s delay)
 API: None
-UI: Home screen with enlarged stuffy, confetti, celebration text, sound, no chat screen, no intermediate button
+UI: Home screen with enlarged stuffy, confetti, celebration text, sound; after 2.8s, review shortcut button may appear if scheduled pins exist
 DO NOT: Skip confetti; skip celebration sound; show intermediate buttons; route through chat
 
---- TRANSITION 20: POST_REMOVAL_ROUTER ---
-Trigger: Celebration block completes (2.8s delay)
-First: showPostRemovalScreen() [chat.js]
-Follow-up: Check remaining reviewable pins via findOldestCompletedNeedle() [scenes.js]
-State read: painPins (filtered for completed && hasNeedle && reviewDay <= currentDay)
-State mutated: None
+--- TRANSITION 20: POST-REMOVAL REVIEW SHORTCUT ---
+Trigger: completePinRemoval() 2.8s celebration timer fires
+First: renderReviewShortcut() [scenes.js]
+Follow-up: findEarliestScheduledNeedle() [scenes.js]; if no eligible pin → hide shortcut, clear showReviewShortcut; if eligible → show "现在回看下一根针" or "快进 X 天，回看下一根针" button
+State read: currentUser.showReviewShortcut, painPins (filtered for completed && hasNeedle), reviewDay, currentDay
+State mutated: showReviewShortcut=false (if no eligible pin or on click)
 API: None
-UI: No remaining reviewable pins → HOME_PIN_CREATION_STATE (clean home); Remaining pins → FAST_FORWARD_REVIEW_STATE (show review panel)
-DO NOT: Skip pin check; route directly to home without checking; create separate pin checking logic
+UI: No eligible pin → clean home (pin creation state); Eligible pin → shortcut button on home screen; clicking it fast-forwards to review panel
+DO NOT: Skip pin check; route directly to review without checking; create separate pin checking logic
 
 --- TRANSITION 21: FALLBACK / ERROR BEHAVIOR ---
 Trigger: API fails/timeout/billing/malformed JSON
@@ -246,11 +255,11 @@ DO NOT: Save fallback to chatHistory; create permanent fallback states; trigger 
 
 --- TRANSITION 22: AUDIO RULES ---
 Trigger: Various actions
-initAudio() → AudioManager.initAudio() [audio.js]: creates Audio objects for bgm, impactAudio, celebrationAudio
-First gesture → AudioManager.isUnlocked=true, AudioManager.startBackgroundMusic()
+initAudio() → AudioManager.initAudio() [audio.js]: creates Audio objects for bgm, impactAudio, celebrationAudio; attaches unlock listeners (pointerdown, touchstart, click, keydown)
+First gesture → AudioManager.bgm.play() called via tryPlay unlock handler; bgmStarted=true on success; unlock listeners removed
 animatePin() → playPinImpactSound() [audio.js]
 showReleaseConfettiOverlay() → AudioManager.playCelebrationSound() (debounced 1s)
-Rules: BGM on first gesture only; impact on pin ceremony; celebration ONLY on confetti
+Rules: BGM on first gesture only (via tryPlay); impact on pin ceremony; celebration ONLY on confetti
 DO NOT: Create separate audio systems; play celebration sound on reschedule
 
 ================================================================================
@@ -270,9 +279,10 @@ USER STATE (currentUser):
 - reviewStage: 'initial_review_analysis' | 'awaiting_user_reason' | 'followup_response' | 'review_conversation' | null
 - companionDayOffset: number
 - firstCompanionDate: timestamp
-- chatHistory: array (deprecated)
-- settings: object
+- showReviewShortcut: boolean (set true by completePinRemoval; cleared by renderReviewShortcut)
+- settings: object (includes musicVolume)
 - progression: object
+Note: chatHistory and companionDays are written at registration but never read by live code (use pin.chatHistory and getCompanionDays() instead)
 
 PIN STATE (pin):
 - id: string
@@ -308,7 +318,6 @@ window.STABIT_MODE: 'reviewNeedle' | null (marks review mode)
 window.reviewingPinId: string | null (mirror of currentUser.reviewingPinId)
 DEV_MODE: boolean (public/js/config.js)
 AI_CHAT_TIMEOUT_MS: 180000 (3 minutes, chat.js)
-DEMO_FAST_FORWARD_DAYS: 3 (config.js)
 
 ================================================================================
  FUNCTION INDEX BY TRANSITION
@@ -325,7 +334,7 @@ validatePassword | public/js/auth.js | 2,3
 UserStorage.getUser | public/js/storage.js | 2,3
 UserStorage.createNewUser | public/js/storage.js | 2
 UserStorage.setCurrentUser | public/js/storage.js | 3
-showHomeScreen | public/js/scenes.js | 3,11,17,18
+showHomeScreen | public/js/scenes.js | 3,11,17,18,19
 isInsideBodyZone | public/js/coords.js | 4
 createPainDot | public/js/scenes.js | 4
 savePainDot | public/js/scenes.js | 4
@@ -334,9 +343,9 @@ sendMessage | public/js/chat.js | 5,14
 addMessage | public/js/chat.js | 5,7,13,14,15,21
 saveMessage | public/js/chat.js | 5,7,13,14,15
 callAIChat | public/js/chat.js | 5,12,14
+buildMemoryContext | public/js/memory.js | 5,6
 processChatAIResponse | public/js/chat.js | 5,7,13,15
-analyzeWorryWithAI | public/js/chat.js | 6
-processAIResult | public/js/chat.js | 6
+addPinCreationChoiceButtons | public/js/chat.js | 7
 beginPinCeremony | public/js/chat.js | 8
 fadeOutChat | public/js/chat.js | 8
 animatePin | public/js/chat.js | 8
@@ -344,7 +353,6 @@ playPinImpactSound | public/js/audio.js | 8
 showSummaryPanel | public/js/chat.js | 8
 fastForwardCompanionDays | public/js/scenes.js | 9
 showReviewPanel | public/js/scenes.js | 9,10
-findOldestCompletedNeedle | public/js/scenes.js | 10,20
 enterReviewChat | public/js/scenes.js | 10,12
 directRemoveNeedle | public/js/scenes.js | 10,11
 sendAutoReviewMessage | public/js/chat.js | 12
@@ -355,7 +363,9 @@ removeReviewedNeedleWithAnimation | public/js/chat.js | 15,18
 showReleaseConfettiOverlay | public/js/chat.js | 19
 showReleaseCelebrationText | public/js/chat.js | 19
 AudioManager.playCelebrationSound | public/js/audio.js | 19
-showPostRemovalScreen | public/js/chat.js | 20
+completePinRemoval | public/js/scenes.js | 11,18,19
+findEarliestScheduledNeedle | public/js/scenes.js | 20
+renderReviewShortcut | public/js/scenes.js | 19,20
 
 ================================================================================
  API CONTRACTS
@@ -366,7 +376,8 @@ Request:
 {
   "mode": "pinning" | "review",
   "messages": [{"role": "user" | "assistant", "content": "text"}],
-  "pin": {coreIssue, reflectionDays, warmExplanation, currentGuides, aiResult, reviewHistory, reviewCount, createdAt, reviewStage, pendingReviewChoice}
+  "pin": {coreIssue, reflectionDays, warmExplanation, currentGuides, aiResult, reviewHistory, reviewCount, createdAt, reviewStage, pendingReviewChoice},
+  "memoryContext": string | null  // optional, pinning mode only; null when no match
 }
 
 Response (pinning):
@@ -382,12 +393,19 @@ Response (review):
   "reply": string,
   "readyToPin": false,
   "readyToRemove": boolean,
-  "review": {stillAffectsUser, reasonCategory, nextReflectionDays}
+  "review": {stillAffectsUser, reasonCategory, nextReflectionDays},
+  "reviewDays": number | undefined  // optional top-level; overrides nextReflectionDays when valid
 }
 
-POST /api/ai/analyze-worry (15s timeout)
-Request: {"userText": string}
-Response: {safe, coreIssue, reflectionDays, warmExplanation, currentGuides}
+Response (fallback, both modes):
+{
+  "reply": string,
+  "readyToPin": false,
+  "readyToRemove": false,
+  "debugFallback": true,
+  "fallbackReason": string,
+  "requestId": string
+}
 
 ================================================================================
  SAFE PATCH CHECKLIST
@@ -417,4 +435,6 @@ Response: {safe, coreIssue, reflectionDays, warmExplanation, currentGuides}
 - node --check public/js/audio.js
 - node --check public/js/coords.js
 - node --check api/ai/chat.js
-- node --check api/ai/analyze-worry.js
+- npm run check
+- node tests/memory.test.mjs
+- node tests/ai-reliability.test.mjs
