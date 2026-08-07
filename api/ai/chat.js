@@ -1141,7 +1141,7 @@ function fallbackResponseForReason(mode, reason, requestId) {
   return fallback;
 }
 
-function buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin) {
+function buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin, memoryContext = null) {
   const systemPrompt = mode === 'review' ? REVIEW_SYSTEM_PROMPT : PINNING_SYSTEM_PROMPT;
   const systemMessage = {
     role: 'system',
@@ -1153,9 +1153,17 @@ function buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin) {
     content: `当前针的信息：核心问题=${pin.coreIssue || '未分析'}，建议回看天数=${pin.reflectionDays || 0}，温柔解释=${pin.warmExplanation || '无'}，引导=${pin.currentGuides ? pin.currentGuides.join('；') : '无'}，AI分析结果=${JSON.stringify(pin.aiResult || {})}，回顾历史=${JSON.stringify(pin.reviewHistory || [])}，回顾次数=${pin.reviewCount || 0}，创建时间=${pin.createdAt ? new Date(pin.createdAt).toLocaleString('zh-CN') : '未知'}，模式=${mode}，reviewStage=${pin.reviewStage || '未设置'}，用户回顾选择=${pin.pendingReviewChoice || '未选择'}`
   } : null;
 
+  const memoryMessage = memoryContext ? {
+    role: 'system',
+    content: memoryContext
+  } : null;
+
   const allMessages = [systemMessage];
   if (pinInfoMessage) {
     allMessages.push(pinInfoMessage);
+  }
+  if (memoryMessage) {
+    allMessages.push(memoryMessage);
   }
   allMessages.push(...messages);
 
@@ -1178,7 +1186,7 @@ function buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin) {
   }
 }
 
-async function callDoubaoChat(mode, messages, pin, requestId = '', attempt = 1, deadlineMs = null) {
+async function callDoubaoChat(mode, messages, pin, requestId = '', attempt = 1, deadlineMs = null, memoryContext = null) {
   const startTime = Date.now();
   const apiKey = process.env.DOUBAO_API_KEY;
   const modelId = process.env.DOUBAO_MODEL_ID;
@@ -1195,7 +1203,7 @@ async function callDoubaoChat(mode, messages, pin, requestId = '', attempt = 1, 
     return fallbackResponseForReason(mode, 'missing_api_key_or_model_id', requestId);
   }
 
-  const body = buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin);
+  const body = buildDoubaoChatBody(apiKey, modelId, apiUrl, mode, messages, pin, memoryContext);
 
   try {
     const controller = new AbortController();
@@ -2242,7 +2250,7 @@ function parseToolCallPinningResponse(data) {
   return response;
 }
 
-function buildMinimaxChatBody(modelId, mode, messages, pin) {
+function buildMinimaxChatBody(modelId, mode, messages, pin, memoryContext = null) {
   const systemPrompt = mode === 'review' ? REVIEW_SYSTEM_PROMPT : PINNING_SYSTEM_PROMPT;
   const systemMessage = {
     role: 'system',
@@ -2254,9 +2262,17 @@ function buildMinimaxChatBody(modelId, mode, messages, pin) {
     content: `当前针的信息：核心问题=${pin.coreIssue || '未分析'}，建议回看天数=${pin.reflectionDays || 0}，温柔解释=${pin.warmExplanation || '无'}，引导=${pin.currentGuides ? pin.currentGuides.join('；') : '无'}，AI分析结果=${JSON.stringify(pin.aiResult || {})}，回顾历史=${JSON.stringify(pin.reviewHistory || [])}，回顾次数=${pin.reviewCount || 0}，创建时间=${pin.createdAt ? new Date(pin.createdAt).toLocaleString('zh-CN') : '未知'}，模式=${mode}，reviewStage=${pin.reviewStage || '未设置'}，用户回顾选择=${pin.pendingReviewChoice || '未选择'}`
   } : null;
 
+  const memoryMessage = memoryContext ? {
+    role: 'system',
+    content: memoryContext
+  } : null;
+
   const allMessages = [systemMessage];
   if (pinInfoMessage) {
     allMessages.push(pinInfoMessage);
+  }
+  if (memoryMessage) {
+    allMessages.push(memoryMessage);
   }
   allMessages.push(...messages);
 
@@ -2289,7 +2305,7 @@ function getMinimaxApiKey() {
          process.env.MINI_MAX_API_KEY;
 }
 
-async function callMinimaxChat(mode, messages, pin, requestId = '', attempt = 1, deadlineMs = null) {
+async function callMinimaxChat(mode, messages, pin, requestId = '', attempt = 1, deadlineMs = null, memoryContext = null) {
   const startTime = Date.now();
   const apiKey = getMinimaxApiKey();
   const modelId = process.env.MINIMAX_MODEL_ID;
@@ -2308,7 +2324,7 @@ async function callMinimaxChat(mode, messages, pin, requestId = '', attempt = 1,
     return fallbackResponseForReason(mode, 'minimax_missing_api_key_or_model_id', requestId);
   }
 
-  const body = buildMinimaxChatBody(modelId, mode, messages, pin);
+  const body = buildMinimaxChatBody(modelId, mode, messages, pin, memoryContext);
 
   try {
     const controller = new AbortController();
@@ -2353,7 +2369,7 @@ async function callMinimaxChat(mode, messages, pin, requestId = '', attempt = 1,
       if (retryRemainingMs > AI_RETRY_MIN_REMAINING_MS) {
         aiLog('attempt', 'minimax tool retry', { id: requestId, attempt: attempt + 1 });
         
-        const retryBody = buildMinimaxChatBody(modelId, mode, messages, pin);
+        const retryBody = buildMinimaxChatBody(modelId, mode, messages, pin, memoryContext);
         retryBody.messages.push({
           role: 'user',
           content: '必须调用 submit_pinning_response。不要直接输出普通文本。'
@@ -2411,7 +2427,7 @@ async function callMinimaxChat(mode, messages, pin, requestId = '', attempt = 1,
   }
 }
 
-async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadlineMs = null) {
+async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadlineMs = null, memoryContext = null) {
   const provider = process.env.AI_PROVIDER || 'doubao';
   const fallbackProvider = process.env.AI_FALLBACK_PROVIDER || 'none';
   
@@ -2422,7 +2438,7 @@ async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadl
   let retried = false;
 
   if (provider === 'minimax') {
-    result = await callMinimaxChat(mode, messages, pin, requestId, 1, deadlineMs);
+    result = await callMinimaxChat(mode, messages, pin, requestId, 1, deadlineMs, memoryContext);
     
     if (!validateChatResponse(result).valid) {
       const shouldRetry = isRetryableReason(result.fallbackReason);
@@ -2434,7 +2450,7 @@ async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadl
       if (shouldRetry && !retried && hasBudgetForRetry && !isConfigError) {
         aiLog('attempt', 'minimax retry', { id: requestId, attempt: 2, remainingMs });
         retried = true;
-        result = await callMinimaxChat(mode, messages, pin, requestId, 2, deadlineMs);
+        result = await callMinimaxChat(mode, messages, pin, requestId, 2, deadlineMs, memoryContext);
       } else if (isConfigError) {
         aiLog('attempt', 'minimax no retry (config error)', { id: requestId, rawReason: result.fallbackReason });
       } else if (!shouldRetry) {
@@ -2451,14 +2467,14 @@ async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadl
         if (fallbackRemainingMs > AI_RETRY_MIN_REMAINING_MS) {
           aiLog('attempt', 'doubao fallback', { id: requestId, remainingMs: fallbackRemainingMs });
           usedFallback = true;
-          result = await callDoubaoChat(mode, messages, pin, requestId, 1, deadlineMs);
+          result = await callDoubaoChat(mode, messages, pin, requestId, 1, deadlineMs, memoryContext);
         } else {
           aiLog('attempt', 'doubao fallback skipped (budget exhausted)', { id: requestId, remainingMs: fallbackRemainingMs });
         }
       }
     }
   } else {
-    result = await callDoubaoChat(mode, messages, pin, requestId, 1, deadlineMs);
+    result = await callDoubaoChat(mode, messages, pin, requestId, 1, deadlineMs, memoryContext);
     
     if (!validateChatResponse(result).valid) {
       const shouldRetry = isRetryableReason(result.fallbackReason);
@@ -2469,7 +2485,7 @@ async function callAIChatWithFallback(mode, messages, pin, requestId = '', deadl
       if (shouldRetry && !retried && hasBudgetForRetry && !isConfigError) {
         aiLog('attempt', 'doubao retry', { id: requestId, attempt: 2, remainingMs });
         retried = true;
-        result = await callDoubaoChat(mode, messages, pin, requestId, 2, deadlineMs);
+        result = await callDoubaoChat(mode, messages, pin, requestId, 2, deadlineMs, memoryContext);
       } else if (!shouldRetry) {
         aiLog('attempt', 'doubao no retry (non-retryable)', { id: requestId, rawReason: result.fallbackReason });
       } else if (!hasBudgetForRetry) {
@@ -2494,7 +2510,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: validation.error });
   }
 
-  const { mode, messages, pin } = req.body;
+  const { mode, messages, pin, memoryContext } = req.body;
 
   // ── Request lifecycle tracking ──
   const requestId = generateRequestId();
@@ -2502,10 +2518,13 @@ export default async function handler(req, res) {
   const deadlineMs = handlerStartTime + AI_TOTAL_BUDGET_MS;
 
   aiLog('start', 'handler', { id: requestId, mode, budgetMs: AI_TOTAL_BUDGET_MS, messagesCount: messages.length });
+  if (memoryContext) {
+    aiLog('memory', 'handler', { id: requestId, memoryContextLength: memoryContext.length });
+  }
 
   // ── Single call with budget-aware retry/fallback ──
   // (callAIChatWithFallback now handles retry internally based on budget and error type)
-  const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin, requestId, deadlineMs);
+  const { result, usedFallback, provider } = await callAIChatWithFallback(mode, messages, pin, requestId, deadlineMs, memoryContext);
 
   // Apply repair layer before validation to fix common formatting issues
   const repairedResult = repairChatResponse(result, mode);

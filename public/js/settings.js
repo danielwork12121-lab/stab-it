@@ -451,6 +451,7 @@ const StabItSettings = {
 
     UserStorage.updateUser(user);
     UserStorage.setCurrentUser(username);
+    if (typeof clearMemoryCache === 'function') clearMemoryCache();
 
     if (DEV_MODE) console.log('[SETTINGS] account reset:', username);
 
@@ -466,6 +467,7 @@ const StabItSettings = {
 
   _performLogout() {
     this.close();
+    if (typeof clearMemoryCache === 'function') clearMemoryCache();
     UserStorage.logout();
     window.reviewingPinId = null;
     window.activePinId = null;

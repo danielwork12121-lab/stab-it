@@ -1161,10 +1161,14 @@ async function callAIChat(userText, options = {}) {
     pendingReviewChoice: currentUser?.pendingReviewChoice
   } : null;
 
+  // V1 Memory: local lookup from existing pins, pinning mode only
+  const memoryContext = buildMemoryContext(currentUser, pin?.id, userText, mode);
+
   const requestBody = {
     mode,
     messages,
-    pin: pinInfo
+    pin: pinInfo,
+    memoryContext
   };
 
   if (DEV_MODE) {
