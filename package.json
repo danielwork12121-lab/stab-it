@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check api/ai/chat.js && node --check api/ai/analyze-worry.js && node --check api/debug-env.js",
+    "check": "node --check server.mjs && node --check api/ai/chat.js && node --check api/debug-env.js",
     "test:ai": "node tests/ai-reliability.test.mjs"
   },
   "dependencies": {

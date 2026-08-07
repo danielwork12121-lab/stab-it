@@ -982,93 +982,6 @@ async function sendMessage() {
   }
 }
 
-async function analyzeWorryWithAI(userText) {
-  if (DEV_MODE) console.log('[AI DEBUG] analyzeWorryWithAI called, userText:', userText.substring(0, 50), 'pin:', getCurrentChatPin()?.id);
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      if (DEV_MODE) console.warn('[AI DEBUG] analyze-worry fetch timed out');
-      controller.abort();
-    }, 30000);
-
-    const response = await fetch('/api/ai/analyze-worry', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ userText }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const aiResult = await response.json();
-
-    if (DEV_MODE) console.log('[AI DEBUG] analyze-worry result received:', aiResult);
-
-    await processAIResult(aiResult);
-
-  } catch (error) {
-    if (DEV_MODE) console.warn('[AI DEBUG] analyze-worry API call failed, using fallback:', error.message || error);
-
-    const fallbackResult = {
-      safe: true,
-      coreIssue: '这件事还需要被安放',
-      reflectionDays: 5,
-      warmExplanation: '我先帮你把这件事轻轻收好，等你准备好再回来看看。',
-      currentGuides: [
-        '先慢慢呼一口气',
-        '把这件事写完整',
-        '今晚先不用急着解决'
-      ]
-    };
-
-    await processAIResult(fallbackResult);
-  }
-}
-
-async function processAIResult(aiResult) {
-  const pin = getCurrentChatPin();
-  if (!pin) {
-    if (DEV_MODE) console.warn('[AI DEBUG] processAIResult called but no current chat pin found');
-    return;
-  }
-
-  const currentUser = getCurrentUser();
-  if (!currentUser) {
-    if (DEV_MODE) console.warn('[AI DEBUG] processAIResult called but no currentUser found');
-    return;
-  }
-
-  const targetPin = currentUser.painPins.find(p => p.id === pin.id);
-  if (!targetPin) {
-    if (DEV_MODE) console.warn('[AI DEBUG] processAIResult pin not found in currentUser:', pin.id);
-    return;
-  }
-
-  targetPin.coreIssue = aiResult.coreIssue;
-  targetPin.reflectionDays = aiResult.reflectionDays;
-  targetPin.warmExplanation = aiResult.warmExplanation;
-  targetPin.currentGuides = aiResult.currentGuides;
-  targetPin.aiAnalyzedAt = Date.now();
-  targetPin.aiResult = aiResult;
-  targetPin.reviewReadyAfterDays = aiResult.reflectionDays;
-  targetPin.aiAnalyzed = true;
-  targetPin.aiAnalyzing = false;
-
-  UserStorage.updateUser(currentUser);
-  UserStorage.setCurrentUser(currentUser.username);
-
-  if (DEV_MODE) {
-    console.log('[AI DEBUG] processAIResult() - pin:', targetPin.id, 'aiAnalyzed:', targetPin.aiAnalyzed, 'coreIssue:', aiResult.coreIssue);
-  }
-}
-
 const AI_CHAT_TIMEOUT_MS = 180000;
 
 async function callAIChat(userText, options = {}) {
@@ -1923,9 +1836,8 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
   if (DEV_MODE) console.log('[CHAT DEBUG] styled review action buttons rendered with three options');
 }
 window.addReviewChoiceButtons = addReviewChoiceButtons;
-window.analyzeWorryWithAI = analyzeWorryWithAI;
 
-function addPinCreationChoiceButtons(reflectionDays) {
+function addPinCreationChoiceButtons(reflection_days) {
   const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
   existingButtons.forEach(btn => btn.remove());
 

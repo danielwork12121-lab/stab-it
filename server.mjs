@@ -1,6 +1,5 @@
 import express from 'express';
 import chatHandler from './api/ai/chat.js';
-import analyzeHandler from './api/ai/analyze-worry.js';
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = parseInt(process.env.PORT, 10) || 3001;
@@ -32,11 +31,6 @@ app.get('/api/ai/chat', (_req, res) => {
   res.status(405).json({ error: 'Method not allowed' });
 });
 app.post('/api/ai/chat', chatHandler);
-
-app.get('/api/ai/analyze-worry', (_req, res) => {
-  res.status(405).json({ error: 'Method not allowed' });
-});
-app.post('/api/ai/analyze-worry', analyzeHandler);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
