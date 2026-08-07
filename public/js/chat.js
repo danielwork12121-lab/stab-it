@@ -1837,7 +1837,7 @@ function addReviewChoiceButtons(nextReflectionDays, reviewData) {
 }
 window.addReviewChoiceButtons = addReviewChoiceButtons;
 
-function addPinCreationChoiceButtons(reflection_days) {
+function addPinCreationChoiceButtons(reflectionDays) {
   const existingButtons = chatLog.querySelectorAll('.chat-action-button, .chat-review-choice-button');
   existingButtons.forEach(btn => btn.remove());
 
@@ -1863,7 +1863,7 @@ function addPinCreationChoiceButtons(reflection_days) {
   
   const pinBtn = document.createElement('button');
   pinBtn.className = 'chat-review-choice-button release';
-  pinBtn.textContent = `交给悠悠，${days}天后再看看`;
+  pinBtn.textContent = `交给忧忧，${days}天后再看看`;
   pinBtn.addEventListener('click', () => {
     const currentUser = getCurrentUser();
     if (currentUser) {
