@@ -311,6 +311,468 @@ body {
 .chat-review-choice-button.release:active {
   box-shadow: 0 2px 6px rgba(212, 127, 164, 0.3);
 }
+
+/* ═══ Settings Modal — refined scoped styles ═══ */
+
+/* Gear button (unchanged) */
+.stabit-settings-button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(108, 69, 226, 0.25);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 200;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 10px rgba(108, 69, 226, 0.2);
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-button:hover {
+  background: rgba(108, 69, 226, 0.4);
+  box-shadow: 0 4px 16px rgba(108, 69, 226, 0.35);
+  color: #fff;
+}
+.stabit-settings-button:active {
+  transform: scale(0.9);
+}
+
+/* Overlay */
+.stabit-settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.stabit-settings-overlay.stabit-settings-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Panel — warmer/brighter glass */
+.stabit-settings-panel {
+  position: relative;
+  width: min(340px, 88vw);
+  max-height: 80vh;
+  background: linear-gradient(155deg, rgba(75, 52, 112, 0.94), rgba(90, 62, 130, 0.94));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px;
+  box-shadow: 0 16px 56px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(156, 93, 229, 0.12), 0 0 40px rgba(156, 93, 229, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: scale(0.97) translateY(5px);
+  transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.stabit-settings-overlay.stabit-settings-open .stabit-settings-panel {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+/* Header */
+.stabit-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 10px;
+}
+.stabit-settings-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+.stabit-settings-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-close:hover { background: rgba(255,255,255,0.16); color: #fff; }
+.stabit-settings-close:active { transform: scale(0.88); }
+
+/* Body */
+.stabit-settings-body {
+  padding: 4px 16px 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stabit-settings-body::-webkit-scrollbar { width: 4px; }
+.stabit-settings-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+/* Grouped surface — lighter translucent card */
+.stabit-settings-surface {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Surface label */
+.stabit-settings-surface-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(180, 160, 220, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  margin-bottom: 2px;
+}
+
+/* Account rows */
+.stabit-settings-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+}
+.stabit-settings-account-label {
+  font-size: 13px;
+  color: rgba(220, 210, 240, 0.65);
+}
+.stabit-settings-account-value {
+  font-size: 13px;
+  color: #fff;
+  font-weight: 500;
+}
+.stabit-settings-account-row-action {
+  justify-content: flex-end;
+  min-height: 24px;
+}
+
+/* Password display + eye */
+.stabit-settings-password-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stabit-settings-eye {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-eye:hover { color: #fff; background: rgba(255,255,255,0.16); transform: scale(1.08); }
+
+/* Link button (修改密码) */
+.stabit-settings-link-btn {
+  background: none;
+  border: none;
+  color: rgba(200, 180, 240, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-link-btn:hover { color: #c8a8ff; text-decoration: underline; }
+
+/* Change password inline surface */
+.stabit-settings-change-pwd {
+  gap: 8px;
+  padding: 14px 12px;
+}
+.stabit-settings-chg-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.stabit-settings-chg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.stabit-settings-chg-label {
+  font-size: 11px;
+  color: rgba(200, 180, 240, 0.6);
+  letter-spacing: 0.3px;
+}
+.stabit-settings-chg-input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+  font-family: inherit;
+}
+.stabit-settings-chg-input:focus {
+  border-color: rgba(156, 93, 229, 0.6);
+}
+.stabit-settings-chg-error {
+  font-size: 12px;
+  color: #ff8a9a;
+  padding: 4px 0;
+}
+.stabit-settings-chg-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.stabit-settings-chg-cancel {
+  flex: 1;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-chg-cancel:hover { background: rgba(255,255,255,0.12); }
+.stabit-settings-chg-ok {
+  flex: 1;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(156, 93, 229, 0.35);
+  border: 1px solid rgba(156, 93, 229, 0.5);
+  color: #e0d0f5;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-chg-ok:hover { background: rgba(156, 93, 229, 0.5); }
+
+/* Volume */
+.stabit-settings-volume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stabit-settings-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+  cursor: pointer;
+  position: relative;
+}
+.stabit-settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #b98cff, #9c5de5);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 1px 6px rgba(156, 93, 229, 0.5);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.stabit-settings-slider::-webkit-slider-thumb:active { transform: scale(1.15); }
+.stabit-settings-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #b98cff, #9c5de5);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 1px 6px rgba(156, 93, 229, 0.5);
+  cursor: pointer;
+}
+.stabit-settings-volume-value {
+  min-width: 38px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Data / Reset */
+.stabit-settings-danger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stabit-settings-reset-btn {
+  align-self: flex-start;
+  padding: 7px 14px;
+  border-radius: 9px;
+  background: rgba(233, 69, 96, 0.12);
+  border: 1px solid rgba(233, 69, 96, 0.25);
+  color: rgba(255, 160, 170, 0.9);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-reset-btn:hover {
+  background: rgba(233, 69, 96, 0.22);
+  color: #ffa8b5;
+}
+.stabit-settings-reset-btn:active { transform: scale(0.97); }
+.stabit-settings-reset-desc {
+  font-size: 11px;
+  color: rgba(200, 190, 220, 0.55);
+  line-height: 1.5;
+}
+
+/* Logout */
+.stabit-settings-logout {
+  margin-top: 2px;
+  padding: 2px 0;
+}
+.stabit-settings-logout-btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(230, 225, 245, 0.85);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-logout-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.stabit-settings-logout-btn:active { transform: scale(0.98); }
+
+/* Reset confirmation overlay */
+.stabit-settings-confirm {
+  position: absolute;
+  inset: 0;
+  background: rgba(25, 16, 42, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 22px;
+  z-index: 10;
+  border-radius: 22px;
+}
+.stabit-settings-confirm-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  text-align: center;
+}
+.stabit-settings-confirm-sub {
+  font-size: 12px;
+  color: rgba(220, 210, 240, 0.55);
+  text-align: center;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.stabit-settings-confirm-actions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  max-width: 220px;
+}
+.stabit-settings-confirm-cancel {
+  flex: 1;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-confirm-cancel:hover { background: rgba(255,255,255,0.14); }
+.stabit-settings-confirm-ok {
+  flex: 1;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(233, 69, 96, 0.35);
+  border: 1px solid rgba(233, 69, 96, 0.5);
+  color: #ffa8b5;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stabit-settings-confirm-ok:hover { background: rgba(233, 69, 96, 0.5); }
+
+/* Toast */
+.stabit-settings-toast {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  background: rgba(156, 93, 229, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 20px;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 20;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.stabit-settings-toast.stabit-settings-toast-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Prevent background scrolling */
+.stabit-settings-noscroll { overflow: hidden; }
 </style>
 </head>
 <body>
@@ -342,6 +804,7 @@ body {
 <script src="./js/auth.js"></script>
 <script src="./js/audio.js"></script>
 <script src="./js/main.js"></script>
+<script src="./js/settings.js"></script>
 <script src="./js/dev.js"></script>
 </body>
 </html>

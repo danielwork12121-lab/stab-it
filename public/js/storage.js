@@ -71,6 +71,13 @@ const UserStorage = {
     return result;
   },
 
+  changePassword(username, newPassword) {
+    const user = this.getUser(username);
+    if (!user) return null;
+    user.password = newPassword;
+    return this.saveUser(user);
+  },
+
   createNewUser(username, password) {
     const user = {
       username,

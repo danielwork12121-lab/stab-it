@@ -193,6 +193,30 @@ const AudioManager = {
 
 function initAudio() {
   AudioManager.initAudio();
+  applySavedMusicVolume();
+}
+
+/**
+ * Apply the current user's saved music volume preference to AudioManager.bgm.
+ * Falls back to 0.2 (20%) when no preference is stored.
+ * Called on init and after login/account switch.
+ */
+function applySavedMusicVolume() {
+  try {
+    const user = UserStorage.getCurrentUser();
+    if (user && user.settings && typeof user.settings.musicVolume === 'number') {
+      const pct = user.settings.musicVolume;
+      const volume = Math.max(0, Math.min(1, pct / 100));
+      if (AudioManager.bgm) {
+        AudioManager.bgm.volume = volume;
+      }
+      if (DEV_MODE) {
+        console.log('[AUDIO] Applied saved music volume:', pct + '%');
+      }
+    }
+  } catch {
+    // No user or settings — keep default 0.2 from initAudio()
+  }
 }
 
 function startBackgroundMusic() {

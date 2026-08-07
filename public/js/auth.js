@@ -98,6 +98,7 @@ function handleLogin() {
   
   if (matchedUser && matchedUser.password === password) {
     UserStorage.setCurrentUser(username);
+    applySavedMusicVolume();
     if (DEV_MODE) {
       console.log('[AUTH DEBUG] user saved:', username);
       console.log('[AUTH DEBUG] showHome called');
