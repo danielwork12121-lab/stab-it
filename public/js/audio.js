@@ -3,7 +3,6 @@ const AudioManager = {
   impactAudio: null,
   celebrationAudio: null,
   bgmStarted: false,
-  isUnlocked: false,
   lastCelebrationPlay: 0,
   _unlockListenersAttached: false,
   _unlockAttemptInFlight: false,
@@ -91,7 +90,6 @@ const AudioManager = {
       this.bgm.play().then(() => {
         this._unlockAttemptInFlight = false;
         this.bgmStarted = true;
-        this.isUnlocked = true;
         this._removeUnlockListeners();
         if (DEV_MODE) {
           console.log('[AUDIO] BGM unlocked successfully');
@@ -124,31 +122,6 @@ const AudioManager = {
     document.removeEventListener('keydown', this._unlockHandler);
     this._unlockHandler = null;
     this._unlockListenersAttached = false;
-  },
-
-  startBackgroundMusic() {
-    if (this.bgmStarted || !this.bgm) {
-      if (DEV_MODE && !this.bgm) console.warn('[AUDIO] bg play attempted - bgm is null');
-      return;
-    }
-
-    if (DEV_MODE) {
-      console.log('[AUDIO] bg play attempted');
-    }
-
-    this.bgm.play().then(() => {
-      this.bgmStarted = true;
-      if (DEV_MODE) {
-        console.log('[AUDIO] bg play success');
-      }
-    }).catch((err) => {
-      if (DEV_MODE) {
-        console.warn('[AUDIO] bg play fail:', err.name || err.message);
-      }
-      if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
-        this.setupUnlockListeners();
-      }
-    });
   },
 
   playPinImpactSound() {
@@ -217,10 +190,6 @@ function applySavedMusicVolume() {
   } catch {
     // No user or settings — keep default 0.2 from initAudio()
   }
-}
-
-function startBackgroundMusic() {
-  AudioManager.startBackgroundMusic();
 }
 
 function playPinImpactSound() {

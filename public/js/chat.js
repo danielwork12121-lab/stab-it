@@ -1,12 +1,5 @@
 const REVIEW_UNPIN_BUTTON_LEFT = '87%';
 const REVIEW_UNPIN_BUTTON_TOP = '4.2%';
-const MOCK_REPLIES = [
-  "我在呢，慢慢说。",
-  "听起来这件事真的让你很难受。",
-  "你可以再多告诉我一点吗？",
-  "我会先帮你把这份烦恼接住。"
-];
-
 const GREETING_MESSAGE = "我在呢，慢慢说。今天发生了什么让你不开心呀？";
 
 const SUMMARY_BLOCKS = {
@@ -642,28 +635,6 @@ function injectChatStyles() {
     }
   `;
   document.head.appendChild(style);
-}
-
-function showReleaseCelebrationButton(onContinue) {
-  const btn = document.createElement('button');
-  btn.className = 'release-celebration-btn';
-  btn.textContent = '庆祝这针情绪退散了！';
-
-  btn.addEventListener('click', () => {
-    if (btn.parentNode) {
-      btn.parentNode.removeChild(btn);
-    }
-    if (onContinue) {
-      onContinue();
-    }
-  });
-
-  const buttonsContainer = chatScreen.querySelector('.summary-buttons');
-  if (buttonsContainer) {
-    buttonsContainer.appendChild(btn);
-  } else {
-    chatScreen.appendChild(btn);
-  }
 }
 
 function showReleaseConfettiOverlay() {

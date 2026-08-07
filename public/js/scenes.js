@@ -100,41 +100,7 @@ function getCurrentCompanionDay() {
   return getCompanionDays();
 }
 
-let reviewingPinId = null;
-window.reviewingPinId = reviewingPinId;
-
-function removeNeedle(pinId) {
-  const currentUser = getCurrentUser();
-  if (!currentUser || !currentUser.painPins) return;
-
-  const pinIndex = currentUser.painPins.findIndex(p => p.id === pinId);
-  if (pinIndex === -1) return;
-
-  const removedPin = currentUser.painPins[pinIndex];
-  if (!removedPin || (!removedPin.completed && !removedPin.hasNeedle)) return;
-
-  currentUser.painPins.splice(pinIndex, 1);
-  UserStorage.updateUser(currentUser);
-  UserStorage.setCurrentUser(currentUser.username);
-
-  return removedPin;
-}
-window.removeNeedle = removeNeedle;
-
-function animateNeedleRemoval(pinElements) {
-  pinElements.forEach(pinEl => {
-    pinEl.classList.add('needle-fade-away');
-  });
-
-  setTimeout(() => {
-    pinElements.forEach(pinEl => {
-      if (pinEl.parentNode) {
-        pinEl.parentNode.removeChild(pinEl);
-      }
-    });
-  }, 1200);
-}
-window.animateNeedleRemoval = animateNeedleRemoval;
+window.reviewingPinId = null;
 
 function findOldestCompletedNeedle() {
   const currentUser = getCurrentUser();
@@ -246,7 +212,6 @@ function showReviewPanel(targetPinId = null) {
 
   // Set reviewingPinId when targetPinId is provided
   if (targetPinId) {
-    reviewingPinId = targetPinId;
     window.reviewingPinId = targetPinId;
 
     const currentUser = getCurrentUser();
@@ -529,7 +494,6 @@ async function ensurePinAnalysisAsync(pinId, coreIssueLineElement) {
 function enterReviewChat(pinId, contextMessage) {
   if (DEV_MODE) console.log('[REVIEW ENTRY DEBUG] enterReviewChat started: pinId=', pinId, 'choice=', contextMessage);
 
-  reviewingPinId = pinId;
   window.reviewingPinId = pinId;
 
   const currentUser = getCurrentUser();

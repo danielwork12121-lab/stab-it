@@ -49,10 +49,6 @@ const AI_RETRY_MIN_REMAINING_MS = (() => {
   return 20000;
 })();
 
-// Legacy constants kept for backward compatibility but superseded by budget logic
-const MINIMAX_TIMEOUT_MS = AI_FIRST_ATTEMPT_TIMEOUT_MS;
-const DOUBAO_TIMEOUT_MS = AI_FIRST_ATTEMPT_TIMEOUT_MS;
-
 // ── Production-safe logging (allowlist-only) ───────────────────────────
 // Only approved primitive fields are ever emitted. No request bodies,
 // provider responses, messages, prompts, errors with raw payloads, or
