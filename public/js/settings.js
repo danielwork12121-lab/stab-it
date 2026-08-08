@@ -151,7 +151,7 @@ const StabItSettings = {
           <div class="stabit-settings-surface-label">数据</div>
           <div class="stabit-settings-danger">
             <button class="stabit-settings-reset-btn" id="stabit-settings-reset-btn">重置当前账户数据</button>
-            <div class="stabit-settings-reset-desc">清除烦恼针、聊天记录和进度，以便重新测试。</div>
+            <div class="stabit-settings-reset-desc">清除这个账户中的所有内容，让你重新开始。</div>
           </div>
         </div>
 
@@ -437,8 +437,10 @@ const StabItSettings = {
     user.chatHistory = [];
     user.companionDays = 1;
     user.firstCompanionDate = Date.now();
+    user.companionDayOffset = 0;
     user.activePinId = null;
     user.reviewingPinId = null;
+    user.reviewStage = null;
     user.pendingAction = null;
     user.pendingReviewAction = null;
     user.showReviewShortcut = false;
@@ -460,7 +462,7 @@ const StabItSettings = {
     window.activePinId = null;
     window.STABIT_CHAT_MODE = null;
     window.STABIT_MODE = null;
-    if (typeof showHomeScreen === 'function') showHomeScreen();
+    window.location.reload();
   },
 
   // ── Logout ────────────────────────────────────────────
