@@ -299,14 +299,20 @@ function injectChatStyles() {
     }
 
     .summary-line.core-issue {
-      max-width: 92%;
-      font-size: 19px;
+      max-width: 88%;
+      margin-left: auto;
+      margin-right: auto;
+      font-size: 18px;
       font-weight: 600;
       line-height: 1.35;
       text-align: center;
-      word-break: keep-all;
-      overflow-wrap: normal;
+      word-break: normal;
+      overflow-wrap: anywhere;
       text-wrap: balance;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     .summary-line.primary {
