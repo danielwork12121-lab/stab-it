@@ -163,7 +163,8 @@ console.log('Test 9: extractReflectionDaysFromText unchanged (real function)');
 {
   assertEq(extractReflectionDaysFromText('15天后'), 15, '15天后 → 15');
   assertEq(extractReflectionDaysFromText('二十天吧'), 20, '二十天吧 → 20');
-  assertEq(extractReflectionDaysFromText('30天'), 30, '30天 → 30');
+  assertEq(extractReflectionDaysFromText('30天'), null, '30天 → null (no schedule intent)');
+  assertEq(extractReflectionDaysFromText('30天后'), 30, '30天后 → 30');
   assertEq(extractReflectionDaysFromText('再给我二十天吧'), 20, '再给我二十天吧 → 20');
   assertEq(extractReflectionDaysFromText('没有日期'), null, 'no date → null');
   assertEq(extractReflectionDaysFromText(''), null, 'empty → null');
