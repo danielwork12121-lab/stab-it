@@ -2619,12 +2619,29 @@ function extractReflectionDaysFromText(text) {
 
 // Convert number to Chinese numeral
 function numberToChinese(num) {
-  const digits = ['零', '一', '二', '两', '三', '四', '五', '六', '七', '八', '九', '十'];
+  // Positional lookup: digits[n] must equal the numeral for n itself.
+  // ('两' is a valid alternate word for "two" in some contexts, but it doesn't
+  // belong in this index-by-value array — inserting it at index 3 shifted
+  // every entry from 3 onward down by one, so digits[num] returned the
+  // numeral for num-1 for every num >= 3 (and digits[10] was '九', not '十').
+  const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
   if (num <= 10) return digits[num];
   if (num < 20) return '十' + (num % 10 === 0 ? '' : digits[num % 10]);
-  const tens = Math.floor(num / 10);
-  const ones = num % 10;
-  return digits[tens] + '十' + (ones === 0 ? '' : digits[ones]);
+  if (num < 100) {
+    const tens = Math.floor(num / 10);
+    const ones = num % 10;
+    return digits[tens] + '十' + (ones === 0 ? '' : digits[ones]);
+  }
+  // 100-365: reflectionDays is validated up to 365 everywhere else in this
+  // file, but this branch didn't exist before — digits[tens] for tens >= 11
+  // was `undefined`, so any 3-digit value rendered as "undefined十X".
+  const hundreds = Math.floor(num / 100);
+  const remainder = num % 100;
+  if (remainder === 0) return digits[hundreds] + '百';
+  if (remainder < 10) return digits[hundreds] + '百零' + digits[remainder];
+  const tens = Math.floor(remainder / 10);
+  const ones = remainder % 10;
+  return digits[hundreds] + '百' + digits[tens] + '十' + (ones === 0 ? '' : digits[ones]);
 }
 
 /**
@@ -3446,5 +3463,6 @@ export const __testHelpers = {
   FALLBACK_RESPONSES,
   fallbackResponseForReason,
   extractReflectionDaysFromText,
-  isUsableCoreIssue
+  isUsableCoreIssue,
+  numberToChinese
 };

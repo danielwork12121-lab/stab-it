@@ -25,6 +25,12 @@
  * 16. MiniMax auth failure with independently available Doubao fallback
  * 17. No arbitrary objects reaching production logs
  * 18. Removed outer retry prevents duplicate provider chains
+ * 19. numberToChinese produces the correct numeral for every value it's
+ *     actually called with (1-365) — regression test for an off-by-one
+ *     caused by a stray '两' entry in the positional digits array, which
+ *     made every corrected reply timeline (ensureReplyTimelineConsistency,
+ *     used for both pinning and review mode) show the wrong day count for
+ *     any value >= 3.
  */
 
 import { __testHelpers as H } from '../api/ai/chat.js';
@@ -44,7 +50,8 @@ const {
   FALLBACK_RESPONSES,
   fallbackResponseForReason,
   extractReflectionDaysFromText,
-  isUsableCoreIssue
+  isUsableCoreIssue,
+  numberToChinese
 } = H;
 
 // ── Test framework ──
@@ -371,6 +378,28 @@ console.log('Test 18: No duplicate provider chains (outer retry removed)');
   assertEq(fb.debugFallback, true, 'repair failure produces fallback, not retry');
   assertEq(fb.fallbackReason, 'validation_failure', 'typed as validation_failure');
   assert(!fb.analysis, 'fallback has no analysis (no state mutation)');
+}
+console.log('  PASS\n');
+
+// ── Test 19: numberToChinese produces the correct numeral for every value ──
+// ensureReplyTimelineConsistency (the only caller) always passes a
+// reflectionDays-style value in [1, 365], so that's the range that matters.
+console.log("Test 19: numberToChinese produces correct numerals (regression for stray digits-array entry)")
+{
+  const expected = {
+    1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十',
+    11: '十一', 15: '十五', 19: '十九', 20: '二十', 21: '二十一',
+    30: '三十', 35: '三十五', 59: '五十九', 60: '六十', 99: '九十九',
+    100: '一百', 101: '一百零一', 105: '一百零五', 110: '一百一十',
+    120: '一百二十', 200: '二百', 300: '三百', 350: '三百五十', 365: '三百六十五',
+  };
+  for (const [num, want] of Object.entries(expected)) {
+    assertEq(numberToChinese(Number(num)), want, `numberToChinese(${num})`);
+  }
+  assert(numberToChinese(5) !== '四', 'numberToChinese(5) is not the old off-by-one value');
+  assert(numberToChinese(10) !== '九', 'numberToChinese(10) is not the old off-by-one value');
+  assert(!numberToChinese(200).includes('undefined'), 'numberToChinese(200) has no 3-digit gap');
+  assert(!numberToChinese(365).includes('undefined'), 'numberToChinese(365) has no 3-digit gap');
 }
 console.log('  PASS\n');
 
