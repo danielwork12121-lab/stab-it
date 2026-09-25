@@ -2510,7 +2510,10 @@ function parseTaggedPinningResponse(content) {
   const analysis = {
     safe: true,
     coreIssue: tags.CORE_ISSUE || '',
-    reflectionDays: parsedReflectionDays || 5,
+    // A correctly-parsed 0 is a real value (see ensureReplyTimelineConsistency's
+    // NOTE ON 0 above) and must not collapse into the 5-day fallback - only a
+    // genuinely unparseable/missing tag (parsedReflectionDays === null) should.
+    reflectionDays: parsedReflectionDays !== null ? parsedReflectionDays : 5,
     warmExplanation: tags.WARM_EXPLANATION || '',
     currentGuides: [
       tags.GUIDE_1 || '',
@@ -3486,5 +3489,6 @@ export const __testHelpers = {
   extractReflectionDaysFromText,
   isUsableCoreIssue,
   numberToChinese,
-  ensureReplyTimelineConsistency
+  ensureReplyTimelineConsistency,
+  parseTaggedPinningResponse
 };
