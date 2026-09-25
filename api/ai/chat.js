@@ -2649,16 +2649,28 @@ function numberToChinese(num) {
  * analysis.reflectionDays is the source of truth
  * Only replaces the numeric part of conflicting timelines in reply text
  *
- * NOTE: reflectionDays/structuredDays is a valid sentinel at 0 (documented
- * in parseAndValidateResponse as "reflectionDays may be 0 in early chat",
- * and reachable via the MiniMax tool-call path even when readyToPin=true).
- * Guards below check for null/undefined explicitly rather than falsiness,
- * so a legitimate 0 doesn't get treated the same as "missing" and skip the
- * consistency check.
+ * NOTE ON 0: reflectionDays is overloaded. During early chat
+ * (readyToPin=false) it is a documented sentinel meaning "no schedule
+ * decided yet" (parseAndValidateResponse: "reflectionDays may be 0 in
+ * early chat") - there is no real schedule to correct the reply against,
+ * so correction must be skipped, same as when the field is genuinely
+ * missing. But once a pin is finalized (readyToPin=true), 0 can be a real,
+ * intentional value (e.g. "revisit today" - reachable via the MiniMax
+ * tool-call path), and correction should run normally, same as any other
+ * day count. The guards below check null/undefined explicitly (rather
+ * than falsiness) so a real 0 isn't treated as "missing," and separately
+ * skip only the readyToPin=false + reflectionDays=0 combination, so the
+ * sentinel case is still skipped without disturbing any other case
+ * (including early-chat with a real nonzero tentative value, which this
+ * function has always corrected against).
  */
 function ensureReplyTimelineConsistency(response, mode) {
   if (mode === 'pinning') {
     if (!response.analysis || response.analysis.reflectionDays === null || response.analysis.reflectionDays === undefined || !response.reply) {
+      return response;
+    }
+    if (response.analysis.reflectionDays === 0 && !response.readyToPin) {
+      // Sentinel: no schedule decided yet (early chat) - nothing to correct against.
       return response;
     }
     
