@@ -51,7 +51,8 @@ const {
   fallbackResponseForReason,
   extractReflectionDaysFromText,
   isUsableCoreIssue,
-  numberToChinese
+  numberToChinese,
+  ensureReplyTimelineConsistency
 } = H;
 
 // ── Test framework ──
@@ -382,11 +383,14 @@ console.log('Test 18: No duplicate provider chains (outer retry removed)');
 console.log('  PASS\n');
 
 // ── Test 19: numberToChinese produces the correct numeral for every value ──
-// ensureReplyTimelineConsistency (the only caller) always passes a
-// reflectionDays-style value in [1, 365], so that's the range that matters.
+// ensureReplyTimelineConsistency (the only caller) passes a reflectionDays-
+// style value in [0, 365] - despite an earlier version of this comment
+// saying [1, 365], 0 is a real, reachable value (see Test 20), so it's
+// covered here too.
 console.log("Test 19: numberToChinese produces correct numerals (regression for stray digits-array entry)")
 {
   const expected = {
+    0: '零',
     1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十',
     11: '十一', 15: '十五', 19: '十九', 20: '二十', 21: '二十一',
     30: '三十', 35: '三十五', 59: '五十九', 60: '六十', 99: '九十九',
@@ -400,6 +404,71 @@ console.log("Test 19: numberToChinese produces correct numerals (regression for 
   assert(numberToChinese(10) !== '九', 'numberToChinese(10) is not the old off-by-one value');
   assert(!numberToChinese(200).includes('undefined'), 'numberToChinese(200) has no 3-digit gap');
   assert(!numberToChinese(365).includes('undefined'), 'numberToChinese(365) has no 3-digit gap');
+}
+console.log('  PASS\n');
+
+// ── Test 20: reflectionDays=0 is not treated as "missing" (sentinel-value bug) ──
+// ensureReplyTimelineConsistency used a falsy check (`!response.analysis.reflectionDays`)
+// to decide whether analysis data was present. Since 0 is a legitimate value
+// (documented in parseAndValidateResponse as "reflectionDays may be 0 in early
+// chat", and reachable via the MiniMax tool-call path even when readyToPin=true),
+// that check silently skipped the consistency fix whenever the AI's structured
+// day count was 0 but its reply text mentioned a different number - e.g. the
+// user-facing reply would say "3天后" ("in 3 days") while the real, stored
+// value was 0, and the mismatch was never corrected.
+console.log('Test 20: reflectionDays=0 is treated as a real value, not "missing" (regression)');
+{
+  // 20a. Pinning mode: analysis.reflectionDays = 0, reply text says a
+  // different number (3) - the reply text must be corrected to match 0,
+  // not silently left inconsistent.
+  const pinningResponse = {
+    reply: '好的，我们3天后再来看看这件事吧。',
+    readyToPin: true,
+    analysis: { reflectionDays: 0, coreIssue: 'test issue', warmExplanation: '', currentGuides: [], safe: true }
+  };
+  const pinningResult = ensureReplyTimelineConsistency(pinningResponse, 'pinning');
+  assert(!pinningResult.reply.includes('3天'), 'pinning: reflectionDays=0 - stale "3天" removed from reply');
+  assert(pinningResult.reply.includes('零天'), 'pinning: reflectionDays=0 - reply corrected to "零天"');
+
+  // 20b. Pinning mode: analysis.reflectionDays = 0 AND reply text already
+  // agrees (no mismatch) - must not throw and must leave the reply alone.
+  const pinningAgreeing = {
+    reply: '好的，我们零天后再来看看这件事吧。',
+    readyToPin: true,
+    analysis: { reflectionDays: 0, coreIssue: 'test issue', warmExplanation: '', currentGuides: [], safe: true }
+  };
+  const pinningAgreeingResult = ensureReplyTimelineConsistency(pinningAgreeing, 'pinning');
+  assertEq(pinningAgreeingResult.reply, pinningAgreeing.reply, 'pinning: reflectionDays=0 with matching reply is left unchanged');
+
+  // 20c. Pinning mode: analysis.reflectionDays is genuinely absent (null) -
+  // must still return early and not throw (distinguishing "missing" from "0").
+  const pinningMissing = {
+    reply: '再聊聊吧。',
+    readyToPin: false,
+    analysis: { reflectionDays: null, coreIssue: '', warmExplanation: '', currentGuides: [], safe: true }
+  };
+  const pinningMissingResult = ensureReplyTimelineConsistency(pinningMissing, 'pinning');
+  assertEq(pinningMissingResult.reply, pinningMissing.reply, 'pinning: reflectionDays=null is still skipped (not treated as 0)');
+
+  // 20d. Review mode: structuredDays = 0 via reviewDays, reply text says a
+  // different number (5) - must be corrected to 0, same as 20a.
+  const reviewResponse = {
+    reply: '好的，五天后我们再来看看。',
+    reviewDays: 0
+  };
+  const reviewResult = ensureReplyTimelineConsistency(reviewResponse, 'review');
+  assert(!reviewResult.reply.includes('五天'), 'review: structuredDays=0 - stale "五天" removed from reply');
+  assert(reviewResult.reply.includes('零天'), 'review: structuredDays=0 - reply corrected to "零天"');
+
+  // 20e. Review mode: structuredDays = 0 via review.nextReflectionDays
+  // (the fallback path in the `??` chain) - same correction should apply.
+  const reviewNestedResponse = {
+    reply: '2天后再聊。',
+    review: { nextReflectionDays: 0 }
+  };
+  const reviewNestedResult = ensureReplyTimelineConsistency(reviewNestedResponse, 'review');
+  assert(!reviewNestedResult.reply.includes('2天'), 'review: nextReflectionDays=0 - stale "2天" removed from reply');
+  assert(reviewNestedResult.reply.includes('零天'), 'review: nextReflectionDays=0 - reply corrected to "零天"');
 }
 console.log('  PASS\n');
 
