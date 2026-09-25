@@ -2648,10 +2648,17 @@ function numberToChinese(num) {
  * Ensures reply text timeline matches analysis.reflectionDays
  * analysis.reflectionDays is the source of truth
  * Only replaces the numeric part of conflicting timelines in reply text
+ *
+ * NOTE: reflectionDays/structuredDays is a valid sentinel at 0 (documented
+ * in parseAndValidateResponse as "reflectionDays may be 0 in early chat",
+ * and reachable via the MiniMax tool-call path even when readyToPin=true).
+ * Guards below check for null/undefined explicitly rather than falsiness,
+ * so a legitimate 0 doesn't get treated the same as "missing" and skip the
+ * consistency check.
  */
 function ensureReplyTimelineConsistency(response, mode) {
   if (mode === 'pinning') {
-    if (!response.analysis || !response.analysis.reflectionDays || !response.reply) {
+    if (!response.analysis || response.analysis.reflectionDays === null || response.analysis.reflectionDays === undefined || !response.reply) {
       return response;
     }
     
@@ -2683,7 +2690,7 @@ function ensureReplyTimelineConsistency(response, mode) {
     // For review mode, structured days = result.reviewDays (or review.nextReflectionDays)
     const structuredDays = response.reviewDays ?? response.review?.nextReflectionDays;
     
-    if (!structuredDays || !response.reply) {
+    if (structuredDays === null || structuredDays === undefined || !response.reply) {
       return response;
     }
     
@@ -3377,7 +3384,9 @@ export default async function handler(req, res) {
   Object.assign(result, repairedResult);
 
   // USER TIMELINE PRIORITY: Extract explicit timeline from user messages and override AI recommendation
-  if (mode === 'pinning' && result.analysis && result.analysis.reflectionDays) {
+  // (reflectionDays may legitimately be 0 - see ensureReplyTimelineConsistency's note above -
+  // so this checks for null/undefined rather than falsiness, same fix as that function.)
+  if (mode === 'pinning' && result.analysis && result.analysis.reflectionDays !== null && result.analysis.reflectionDays !== undefined) {
     const latestUserMessage = messages
       .filter(m => m.role === 'user')
       .at(-1)?.content || '';
@@ -3464,5 +3473,6 @@ export const __testHelpers = {
   fallbackResponseForReason,
   extractReflectionDaysFromText,
   isUsableCoreIssue,
-  numberToChinese
+  numberToChinese,
+  ensureReplyTimelineConsistency
 };
