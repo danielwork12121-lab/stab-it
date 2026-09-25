@@ -52,7 +52,8 @@ const {
   extractReflectionDaysFromText,
   isUsableCoreIssue,
   numberToChinese,
-  ensureReplyTimelineConsistency
+  ensureReplyTimelineConsistency,
+  parseTaggedPinningResponse
 } = H;
 
 // ── Test framework ──
@@ -510,6 +511,44 @@ console.log('Test 20: reflectionDays=0 is treated as a real value, not "missing"
   const reviewNestedResult = ensureReplyTimelineConsistency(reviewNestedResponse, 'review');
   assert(!reviewNestedResult.reply.includes('2天'), 'review: nextReflectionDays=0 - stale "2天" removed from reply');
   assert(reviewNestedResult.reply.includes('零天'), 'review: nextReflectionDays=0 - reply corrected to "零天"');
+}
+console.log('  PASS\n');
+
+// ── Test 21: parseTaggedPinningResponse preserves REFLECTION_DAYS=0 (issue #1) ──
+// parsedReflectionDays || 5 treated a correctly-parsed 0 as falsy and
+// silently replaced it with 5 before analysis.reflectionDays ever reached
+// ensureReplyTimelineConsistency - so that function's readyToPin-aware
+// guard (Test 20f) never actually saw a real 0 for tagged-format responses,
+// only an already-corrupted 5. Issue #1's own suggested fix:
+// parsedReflectionDays !== null ? parsedReflectionDays : 5.
+console.log('Test 21: parseTaggedPinningResponse preserves REFLECTION_DAYS=0 (regression, issue #1)');
+{
+  // 21a. REFLECTION_DAYS=0 must survive as 0, not become 5.
+  const taggedZero = '<REPLY>先等一下，我们再聊聊这件事。</REPLY><READY_TO_PIN>false</READY_TO_PIN><READY_TO_REMOVE>false</READY_TO_REMOVE><CORE_ISSUE></CORE_ISSUE><REFLECTION_DAYS>0</REFLECTION_DAYS><WARM_EXPLANATION></WARM_EXPLANATION>';
+  const zeroResult = parseTaggedPinningResponse(taggedZero);
+  assertEq(zeroResult.analysis.reflectionDays, 0, 'REFLECTION_DAYS=0 is preserved as 0, not collapsed to 5');
+
+  // 21b. A genuinely missing/unparseable REFLECTION_DAYS tag still falls
+  // back to 5, same as before - only the real-0 case changed.
+  const taggedMissing = '<REPLY>好的。</REPLY><READY_TO_PIN>true</READY_TO_PIN><READY_TO_REMOVE>false</READY_TO_REMOVE><CORE_ISSUE>test</CORE_ISSUE><WARM_EXPLANATION></WARM_EXPLANATION>';
+  const missingResult = parseTaggedPinningResponse(taggedMissing);
+  assertEq(missingResult.analysis.reflectionDays, 5, 'missing REFLECTION_DAYS tag still falls back to 5 (unchanged)');
+
+  // 21c. A normal nonzero value is unaffected.
+  const taggedNormal = '<REPLY>好的，我们三天后再聊。</REPLY><READY_TO_PIN>true</READY_TO_PIN><READY_TO_REMOVE>false</READY_TO_REMOVE><CORE_ISSUE>test</CORE_ISSUE><REFLECTION_DAYS>3</REFLECTION_DAYS><WARM_EXPLANATION></WARM_EXPLANATION>';
+  const normalResult = parseTaggedPinningResponse(taggedNormal);
+  assertEq(normalResult.analysis.reflectionDays, 3, 'a normal nonzero REFLECTION_DAYS value is unaffected');
+
+  // 21d. End-to-end: REFLECTION_DAYS=0 parsed here, fed into
+  // ensureReplyTimelineConsistency with readyToPin=false, must now
+  // correctly skip correction (Test 20f's scenario, but reached via the
+  // real upstream parser instead of a hand-built object).
+  const e2eReply = '先等三天，你冷静一下，我们再聊聊这件事。';
+  const taggedE2E = `<REPLY>${e2eReply}</REPLY><READY_TO_PIN>false</READY_TO_PIN><READY_TO_REMOVE>false</READY_TO_REMOVE><CORE_ISSUE></CORE_ISSUE><REFLECTION_DAYS>0</REFLECTION_DAYS><WARM_EXPLANATION></WARM_EXPLANATION>`;
+  const e2eParsed = parseTaggedPinningResponse(taggedE2E);
+  assertEq(e2eParsed.analysis.reflectionDays, 0, 'end-to-end: parsed reflectionDays is really 0 before consistency check');
+  const e2eResult = ensureReplyTimelineConsistency(e2eParsed, 'pinning');
+  assertEq(e2eResult.reply, e2eReply, 'end-to-end: early-chat reply is left uncorrected when reflectionDays genuinely parsed as 0');
 }
 console.log('  PASS\n');
 
