@@ -416,6 +416,16 @@ console.log('  PASS\n');
 // day count was 0 but its reply text mentioned a different number - e.g. the
 // user-facing reply would say "3天后" ("in 3 days") while the real, stored
 // value was 0, and the mismatch was never corrected.
+//
+// IMPORTANT NUANCE (see issue #1, and 20f below): 0 is overloaded. During
+// early chat (readyToPin=false) it means "no schedule decided yet" - there
+// is nothing real to correct the reply against, so correction must still be
+// skipped there, exactly like the pre-fix code accidentally did. The fix is
+// narrower than "always treat 0 as real": it only stops skipping when the
+// pin is actually finalized (readyToPin=true), where 0 can be a genuine
+// "revisit today." An earlier version of this fix skipped readyToPin
+// entirely and over-corrected early-chat replies into garbled text (e.g.
+// "先等三天" -> "先等零天后") - 20f below locks in that it no longer does.
 console.log('Test 20: reflectionDays=0 is treated as a real value, not "missing" (regression)');
 {
   // 20a. Pinning mode: analysis.reflectionDays = 0, reply text says a
@@ -437,8 +447,9 @@ console.log('Test 20: reflectionDays=0 is treated as a real value, not "missing"
     readyToPin: true,
     analysis: { reflectionDays: 0, coreIssue: 'test issue', warmExplanation: '', currentGuides: [], safe: true }
   };
+  const pinningAgreeingOriginalReply = pinningAgreeing.reply; // snapshot: function mutates + returns same ref
   const pinningAgreeingResult = ensureReplyTimelineConsistency(pinningAgreeing, 'pinning');
-  assertEq(pinningAgreeingResult.reply, pinningAgreeing.reply, 'pinning: reflectionDays=0 with matching reply is left unchanged');
+  assertEq(pinningAgreeingResult.reply, pinningAgreeingOriginalReply, 'pinning: reflectionDays=0 with matching reply is left unchanged');
 
   // 20c. Pinning mode: analysis.reflectionDays is genuinely absent (null) -
   // must still return early and not throw (distinguishing "missing" from "0").
@@ -447,8 +458,38 @@ console.log('Test 20: reflectionDays=0 is treated as a real value, not "missing"
     readyToPin: false,
     analysis: { reflectionDays: null, coreIssue: '', warmExplanation: '', currentGuides: [], safe: true }
   };
+  const pinningMissingOriginalReply = pinningMissing.reply; // snapshot: function mutates + returns same ref
   const pinningMissingResult = ensureReplyTimelineConsistency(pinningMissing, 'pinning');
-  assertEq(pinningMissingResult.reply, pinningMissing.reply, 'pinning: reflectionDays=null is still skipped (not treated as 0)');
+  assertEq(pinningMissingResult.reply, pinningMissingOriginalReply, 'pinning: reflectionDays=null is still skipped (not treated as 0)');
+
+  // 20f. Pinning mode, EARLY CHAT (readyToPin=false): analysis.reflectionDays
+  // = 0 is the "no schedule decided yet" sentinel here, not a real value -
+  // correction must be skipped, even though the reply contains a schedule-
+  // sounding phrase that extractReflectionDaysFromText would otherwise
+  // match. This is the exact scenario from issue #1's repro. Regression
+  // check for the readyToPin-unaware version of this fix, which incorrectly
+  // rewrote "先等三天" ("wait 3 days") into the nonsensical "先等零天后".
+  const earlyChatSentinel = {
+    reply: '先等三天，你冷静一下，我们再聊聊这件事。',
+    readyToPin: false,
+    analysis: { reflectionDays: 0, coreIssue: '', warmExplanation: '', currentGuides: [], safe: true }
+  };
+  const earlyChatSentinelOriginalReply = earlyChatSentinel.reply; // snapshot: function mutates + returns same ref
+  const earlyChatSentinelResult = ensureReplyTimelineConsistency(earlyChatSentinel, 'pinning');
+  assertEq(earlyChatSentinelResult.reply, earlyChatSentinelOriginalReply, 'pinning: early-chat reflectionDays=0 sentinel is left uncorrected (not a real schedule)');
+
+  // 20g. Pinning mode, early chat (readyToPin=false), but reflectionDays is
+  // a real nonzero tentative value - this function has always corrected
+  // against nonzero values regardless of readyToPin, and that must not
+  // change (only the 0-sentinel case is newly skipped).
+  const earlyChatTentative = {
+    reply: '先等2天，我们再聊。',
+    readyToPin: false,
+    analysis: { reflectionDays: 5, coreIssue: '', warmExplanation: '', currentGuides: [], safe: true }
+  };
+  const earlyChatTentativeResult = ensureReplyTimelineConsistency(earlyChatTentative, 'pinning');
+  assert(!earlyChatTentativeResult.reply.includes('2天'), 'pinning: early-chat nonzero reflectionDays is still corrected (unchanged behavior)');
+  assert(earlyChatTentativeResult.reply.includes('五天'), 'pinning: early-chat nonzero reflectionDays corrected to the real value');
 
   // 20d. Review mode: structuredDays = 0 via reviewDays, reply text says a
   // different number (5) - must be corrected to 0, same as 20a.
